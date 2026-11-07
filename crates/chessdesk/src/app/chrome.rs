@@ -24,6 +24,8 @@ const DROPDOWN_OFFSET: Pixels = px(26.);
 /// From the top of the logo's button, the height of the ribbon, to its dropdown.
 const BRAND_DROPDOWN_OFFSET: Pixels = px(29.);
 const LOGO_HEIGHT: Pixels = px(11.);
+/// The room the macOS window buttons take at the left of the bar, placed by `main`.
+const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 const PROMOTION_SIZE: Pixels = px(64.);
 /// The menus, as the ids of their titles.
 const MENUS: [&str; 3] = ["menu-game", "menu-review", "menu-view"];
@@ -85,10 +87,6 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
             None,
             Some(action("take-back", Some("Ctrl+Z"), &TakeBack)),
             Some(action("resign", None, &Resign)),
-            None,
-            Some(action("settings", Some("Ctrl+,"), &OpenSettings)),
-            None,
-            Some(action("quit", Some("Ctrl+Q"), &Quit)),
         ],
         1 => {
             let mut entries = vec![Some(action("analyze-with-stockfish", None, &Analyze)), None];
@@ -112,6 +110,10 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
                 cx.open_url(REPOSITORY);
             })),
             Some(unavailable(tr("check-for-updates"))),
+            None,
+            Some(action("settings", Some("Ctrl+,"), &OpenSettings)),
+            None,
+            Some(action("quit", Some("Ctrl+Q"), &Quit)),
         ],
         _ => {
             let mut entries = vec![
@@ -205,6 +207,11 @@ impl Chessdesk {
             .items_center()
             .h(ui::TITLE_BAR_HEIGHT)
             .text_color(settings.colors.muted)
+            // Full screen hides the window buttons, and the room they take with them.
+            .when(
+                cfg!(target_os = "macos") && !window.is_fullscreen(),
+                |bar| bar.pl(TRAFFIC_LIGHTS_WIDTH),
+            )
             .child(self.render_brand(window, cx))
             .child(line)
             .child(menus);
@@ -263,7 +270,7 @@ impl Chessdesk {
                     cx.notify();
                 }
             }))
-            .child(ui::icon(Icon::Logo, LOGO_HEIGHT, muted))
+            .child(ui::icon(Icon::Logo, LOGO_HEIGHT, settings.colors.text))
             .child("Chessdesk")
             .child(ui::icon(Icon::ChevronDown, settings.ui_font_size, muted));
         let dropdown = is_open.then(|| self.render_dropdown(BRAND_MENU, window, cx));

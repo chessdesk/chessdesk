@@ -98,6 +98,7 @@ impl AssetSource for Assets {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Logo {
     Stockfish,
+    Maia,
     ClaudeCode,
     Codex,
 }
@@ -112,6 +113,8 @@ static STOCKFISH: LazyLock<Arc<Image>> = LazyLock::new(|| {
         include_bytes!("../../assets/stockfish.png"),
     )
 });
+static MAIA: LazyLock<Arc<Image>> =
+    LazyLock::new(|| logo_image(ImageFormat::Png, include_bytes!("../../assets/maia.png")));
 static CLAUDE_CODE: LazyLock<Arc<Image>> = LazyLock::new(|| {
     logo_image(
         ImageFormat::Png,
@@ -124,6 +127,7 @@ static CODEX: LazyLock<Arc<Image>> =
 pub fn logo(logo: Logo, size: Pixels) -> Img {
     let image = match logo {
         Logo::Stockfish => STOCKFISH.clone(),
+        Logo::Maia => MAIA.clone(),
         Logo::ClaudeCode => CLAUDE_CODE.clone(),
         Logo::Codex => CODEX.clone(),
     };

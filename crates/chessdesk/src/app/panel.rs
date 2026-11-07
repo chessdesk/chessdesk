@@ -736,8 +736,15 @@ impl Chessdesk {
                 wide("take-back", "take-back")
                     .on_click(cx.listener(|this, _, _, cx| this.take_back(cx)))
             };
-            let hint = session.player_to_move().then(|| suggest("hint", cx));
-            buttons = buttons.children(hint).child(first).child(
+            // Greyed out rather than gone while it's not your move, so the buttons below stay put.
+            let hint = if session.player_to_move() {
+                suggest("hint", cx)
+            } else {
+                ui::disabled_button("suggest", tr("hint"), &settings)
+                    .w_full()
+                    .into_any_element()
+            };
+            buttons = buttons.child(hint).child(first).child(
                 wide("resign", "resign").on_click(cx.listener(|this, _, _, cx| this.resign(cx))),
             );
         } else {

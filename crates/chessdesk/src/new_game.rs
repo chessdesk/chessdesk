@@ -69,6 +69,7 @@ fn field(id: &'static str, label_id: &str) -> Field {
 fn logo_of(kind: OpponentKind) -> Option<Logo> {
     match kind {
         OpponentKind::Stockfish => Some(Logo::Stockfish),
+        OpponentKind::Maia => Some(Logo::Maia),
         OpponentKind::ClaudeCode => Some(Logo::ClaudeCode),
         OpponentKind::Codex => Some(Logo::Codex),
         _ => None,
