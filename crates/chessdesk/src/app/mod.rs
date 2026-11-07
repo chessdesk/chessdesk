@@ -9,6 +9,7 @@ mod motion;
 mod panel;
 mod session;
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -34,6 +35,7 @@ use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
+use panel::Section;
 use session::{Session, SessionId};
 
 actions!(
@@ -121,6 +123,8 @@ pub struct Chessdesk {
     history_width: Pixels,
     panel_width: Pixels,
     log_height: Pixels,
+    /// The game panel's sections folded into their titles.
+    collapsed: HashSet<Section>,
     moves_scroll: ScrollHandle,
     /// The game and row of the log last scrolled to, so that it only follows a change and
     /// leaves the player's own scrolling alone.
@@ -166,6 +170,8 @@ impl Chessdesk {
             history_width: settings.history_width,
             panel_width: settings.panel_width,
             log_height: settings.log_height,
+            // Notes are there for when they're wanted, not in the way of the moves.
+            collapsed: HashSet::from([Section::Notes]),
             moves_scroll: ScrollHandle::new(),
             followed_row: None,
             follow_again: false,

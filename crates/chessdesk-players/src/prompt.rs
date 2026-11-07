@@ -121,9 +121,11 @@ fn player_moves(game: &Game) -> Vec<usize> {
 }
 
 /// The whole review in one message: the game as PGN, evaluations included if there are any,
-/// and the moves to comment on.
+/// and the moves to comment on. The player's notes are their own and stay out of it.
 pub fn review(game: &Game) -> String {
-    let mut text = pgn::write(game);
+    let mut shared = game.clone();
+    shared.notes.clear();
+    let mut text = pgn::write(&shared);
     text.push_str("\nComment on:");
     for index in player_moves(game) {
         let _ = write!(text, " {}", numbered(game, index));
@@ -216,5 +218,12 @@ mod tests {
     #[test]
     fn review_of_someone_elses_game_covers_every_move() {
         assert!(review(&after(&["e4", "e5"])).ends_with("Comment on: 1. e4 1... e5"));
+    }
+
+    #[test]
+    fn review_leaves_out_the_players_notes() {
+        let mut game = after(&["e4", "e5"]);
+        game.notes = "My secret plan".to_owned();
+        assert!(!review(&game).contains("secret"));
     }
 }

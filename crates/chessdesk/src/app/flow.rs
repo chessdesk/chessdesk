@@ -41,10 +41,9 @@ const LOW_TIME: Duration = Duration::from_secs(10);
 /// What a running analysis reports.
 enum AnalysisUpdate {
     Progress(usize),
-    Done(Result<Game, PlayerError>),
+    Done(Result<Box<Game>, PlayerError>),
 }
 
-/// Gives the player's move that led to `ply` its verdict, in tutoring against an engine.
 /// What the end of a game sounds like for the player, if they were in it.
 fn ending_sound(game: &Game) -> Option<Sound> {
     match library::standing(game)? {
@@ -55,6 +54,7 @@ fn ending_sound(game: &Game) -> Option<Sound> {
     }
 }
 
+/// Gives the player's move that led to `ply` its verdict, in tutoring against an engine.
 fn grade(session: &mut Session, ply: usize) {
     let Some(live) = session
         .live
@@ -167,8 +167,32 @@ impl Chessdesk {
         self.active = id;
         self.settings_page = None;
         self.attach_instructions(id, cx);
+        self.attach_notes(id, cx);
         self.run_clocks(cx);
         self.after_change(id, cx);
+    }
+
+    /// Gives a game its field for the player's notes.
+    fn attach_notes(&mut self, id: SessionId, cx: &mut Context<Self>) {
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        let text = session.game.notes.clone();
+        let area = cx.new(|cx| TextArea::new(text, tr("notes-placeholder"), cx));
+        let changes = cx.subscribe(&area, move |this, area, _: &Changed, cx| {
+            let text = area.read(cx).text().to_owned();
+            this.on_notes(id, text, cx);
+        });
+        session.notes = Some((area, changes));
+    }
+
+    /// Keeps the notes in the game's file, as they're typed.
+    fn on_notes(&mut self, id: SessionId, text: String, cx: &mut Context<Self>) {
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        session.game.notes = text;
+        self.autosave(id, cx);
     }
 
     /// Gives a game against an agent its field for how to play.
@@ -950,6 +974,7 @@ impl Chessdesk {
         self.sessions.retain(|session| session.path.is_some());
         self.sessions.push(session);
         self.active = id;
+        self.attach_notes(id, cx);
         if resumed {
             self.attach_instructions(id, cx);
             self.run_clocks(cx);
@@ -1014,7 +1039,7 @@ impl Chessdesk {
                     let _ = progress.send(AnalysisUpdate::Progress(done));
                 })
             });
-            let _ = updates.send(AnalysisUpdate::Done(analysed.map(|()| game)));
+            let _ = updates.send(AnalysisUpdate::Done(analysed.map(|()| Box::new(game))));
         })
         .detach();
         cx.spawn(async move |this, cx| {
@@ -1046,8 +1071,10 @@ impl Chessdesk {
             AnalysisUpdate::Done(analysed) => {
                 session.analysis = None;
                 match analysed {
-                    Ok(game) => {
-                        session.game = game;
+                    Ok(mut game) => {
+                        // Notes typed while the analysis ran are newer than its copy.
+                        game.notes = std::mem::take(&mut session.game.notes);
+                        session.game = *game;
                         self.autosave(id, cx);
                     }
                     Err(error) => self.report(format!("Stockfish: {error}"), cx),
@@ -1110,7 +1137,9 @@ impl Chessdesk {
         session.agent_review = false;
         match reviewed {
             Ok((_, 0, _)) => self.report(tr("review-empty"), cx),
-            Ok((game, _, tokens)) => {
+            Ok((mut game, _, tokens)) => {
+                // Notes typed while the review ran are newer than its copy.
+                game.notes = std::mem::take(&mut session.game.notes);
                 let first = game
                     .moves()
                     .iter()

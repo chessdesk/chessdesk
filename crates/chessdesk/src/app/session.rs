@@ -80,6 +80,8 @@ pub struct Session {
     pub suggesting: bool,
     /// The engine's best move in each position it looked at, by ply.
     pub best_moves: BTreeMap<usize, Move>,
+    /// The field for the player's notes, once there's a game to take them.
+    pub notes: Option<(Entity<TextArea>, Subscription)>,
 }
 
 /// A hint or the best move, and the position it's for.
@@ -108,6 +110,7 @@ impl Session {
             suggestion: None,
             suggesting: false,
             best_moves: BTreeMap::new(),
+            notes: None,
         }
     }
 

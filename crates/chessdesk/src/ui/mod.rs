@@ -218,6 +218,34 @@ pub fn action_button(
         .child(label.into())
 }
 
+/// An [`action_button`] for the main thing to do: filled, in the colour of a speech bubble.
+/// Built afresh rather than from one, since GPUI allows an element only one hover style.
+pub fn primary_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    settings: &Settings,
+) -> Stateful<Div> {
+    let accent = settings.colors.accent;
+    let raised = accent.blend(settings.colors.text.opacity(0.08));
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(CONTROL_HEIGHT)
+        .px_2()
+        .py_0p5()
+        .rounded(settings.corner_radius)
+        .cursor_pointer()
+        .text_color(settings.colors.text)
+        .bg(accent)
+        .border_1()
+        .border_color(accent)
+        .hover(move |style| style.bg(raised))
+        .child(label.into())
+}
+
 /// One device pixel. A logical 1px would round to 1 or 2 device pixels
 /// by position at fractional display scales, making lines uneven.
 pub fn hairline(window: &Window) -> Pixels {
