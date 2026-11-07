@@ -1,0 +1,22 @@
+# Monokai: the colours of Sublime Text's Monokai colour scheme, in Chessdesk's theme format.
+background = "#272822"
+accent = "#3e3d32"
+popover = "#20211c"
+popover_border = "#3c3d37"
+text = "#f8f8f2"
+muted = "#898574"
+icon = "#75715e"
+caret = "#f8f8f0"
+callout = "#fd971f"
+keyword = "#f92672"
+string = "#e6db74"
+comment = "#75715e"
+function = "#a6e22e"
+type = "#66d9ef"
+number = "#ae81ff"
+constant = "#ae81ff"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#1b1c18", "#f92672", "#a6e22e", "#e6db74", "#66d9ef", "#ae81ff", "#93ecdd", "#f8f8f2",
+    "#75715e", "#fb5692", "#b9e859", "#eee6a0", "#95e4f4", "#c7a8ff", "#bef4eb", "#ffffff",
+]

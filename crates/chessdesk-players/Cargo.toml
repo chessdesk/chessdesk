@@ -1,0 +1,25 @@
+[package]
+name = "chessdesk-players"
+description = "Chessdesk's opponents and analysts: UCI engines and ACP agents."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+agent-client-protocol = { version = "5", features = ["process", "unstable_session_system_prompt", "unstable_end_turn_token_usage"] }
+chessdesk-core.workspace = true
+flate2 = "1"
+futures = "0.3"
+serde.workspace = true
+serde_json = "1"
+shakmaty.workspace = true
+tar = "0.4"
+ureq = "3"
+which = "8"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

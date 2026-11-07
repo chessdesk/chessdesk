@@ -1,0 +1,10 @@
+# By Armando Hernandez Marroquin, GPLv2+. These SVGs are the ones Lichess ships:
+# https://github.com/lichess-org/lila/tree/master/public/piece/merida
+name = "merida"
+version = "1.0.0"
+description = "The Merida chess pieces"
+license = "GPL-2.0-or-later"
+
+[[pieces]]
+name = "Merida"
+dir = "svg"

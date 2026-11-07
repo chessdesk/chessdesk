@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Chessdesk
+Comment=Play chess against engines and AI agents
+Exec=chessdesk
+Icon=chessdesk
+Terminal=false
+Categories=Game;BoardGame;

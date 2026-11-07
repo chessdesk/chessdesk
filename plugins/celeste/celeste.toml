@@ -1,0 +1,22 @@
+# Celeste: the colours of Sublime Text's Celeste colour scheme, in Chessdesk's theme format.
+background = "#ffffff"
+accent = "#eeeeee"
+popover = "#f6f6f6"
+popover_border = "#e4e4e4"
+text = "#444444"
+muted = "#888888"
+icon = "#aaaaaa"
+caret = "#ff4d97"
+callout = "#f58a3d"
+keyword = "#000000"
+string = "#957350"
+comment = "#888888"
+function = "#f58a3d"
+type = "#228ec3"
+number = "#e46767"
+constant = "#f55c3d"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#333333", "#d02525", "#188b2c", "#b28600", "#228ec3", "#7047c2", "#188b78", "#888888",
+    "#666666", "#df4949", "#1fad36", "#d6a100", "#3ca7dd", "#8866cc", "#22c3a8", "#aaaaaa",
+]

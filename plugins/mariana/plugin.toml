@@ -1,0 +1,8 @@
+name = "mariana"
+version = "1.0.0"
+description = "Colours of Sublime Text's Mariana scheme"
+license = "GPL-3.0-or-later"
+
+[[themes]]
+name = "Mariana"
+file = "mariana.toml"

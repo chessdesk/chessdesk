@@ -1,0 +1,769 @@
+//! The settings page. Every control writes straight to `config.toml`, which stays the
+//! single source of truth: the file can still be edited by hand.
+
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::Duration;
+
+use chessdesk_players::acp::AgentKind;
+use chessdesk_players::adapters::{self, Readiness};
+use chessdesk_players::download::{self, can_download_lc0, can_download_stockfish};
+use gpui::{
+    AnyElement, App, Context, Entity, EventEmitter, MouseButton, PathPromptOptions, Pixels,
+    SharedString, Window, div, prelude::*, px,
+};
+
+use crate::audio;
+use crate::i18n::{self, tr, tr_with};
+use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
+use crate::setup::{OpponentKind, title_case};
+use crate::ui;
+
+const CONTENT_WIDTH: Pixels = px(560.);
+/// How often a download's progress is looked at.
+const PROGRESS_TICK: Duration = Duration::from_millis(200);
+/// `board_size` in the file, in twentieths: from half the room to all of it.
+const BOARD_SIZES: [f64; 11] = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.];
+const FONT_SIZES: [f64; 7] = [10., 11., 12., 13., 14., 15., 16.];
+const CORNER_RADII: [f64; 9] = [0., 1., 2., 3., 4., 5., 6., 7., 8.];
+const VOLUMES: [f64; 11] = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
+/// Every key, as the Game menu's shortcuts and the board's own: the id of what it does,
+/// and the key.
+const KEYS: [(&str, &str); 15] = [
+    ("new-game", "Ctrl+N"),
+    ("open-game", "Ctrl+O"),
+    ("save-game-as", "Ctrl+S"),
+    ("export-game", "Ctrl+E"),
+    ("settings", "Ctrl+,"),
+    ("game-history", "Ctrl+B"),
+    ("game-panel", "Ctrl+Shift+B"),
+    ("flip-board", "Ctrl+F"),
+    ("take-back", "Ctrl+Z"),
+    ("previous-move", "Left"),
+    ("next-move", "Right"),
+    ("first-move", "Home"),
+    ("last-move", "End"),
+    ("quit", "Ctrl+Q"),
+    ("close-settings", "Esc"),
+];
+
+/// The pages of the settings, in the order of the list on the left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsPage {
+    Appearance,
+    Board,
+    Sound,
+    Engines,
+    Agents,
+    Keys,
+    Plugins,
+}
+
+impl SettingsPage {
+    const ALL: [Self; 7] = [
+        Self::Appearance,
+        Self::Board,
+        Self::Sound,
+        Self::Engines,
+        Self::Agents,
+        Self::Keys,
+        Self::Plugins,
+    ];
+
+    fn title(self) -> SharedString {
+        tr(match self {
+            Self::Appearance => "page-appearance",
+            Self::Board => "page-board",
+            Self::Sound => "page-sound",
+            Self::Engines => "page-engines",
+            Self::Agents => "page-agents",
+            Self::Keys => "page-keys",
+            Self::Plugins => "page-plugins",
+        })
+    }
+}
+
+pub enum Event {
+    Changed,
+    Close,
+    Failed(String),
+}
+
+/// An engine that can be fetched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Engine {
+    Stockfish,
+    Maia,
+}
+
+/// What a running download reports.
+enum Update {
+    Progress(f32),
+    Done(Result<Vec<(&'static str, PathBuf)>, String>),
+}
+
+pub struct SettingsView {
+    page: SettingsPage,
+    open_select: Option<&'static str>,
+    /// What's being fetched, and how far along it is, from 0 to 1.
+    downloading: Option<(Engine, f32)>,
+    /// The agent whose adapter is being installed.
+    installing: Option<AgentKind>,
+}
+
+impl EventEmitter<Event> for SettingsView {}
+
+/// A stored name as it shows: the few that aren't a plugin's own are in the interface's
+/// language, and the rest are names.
+fn shown(name: &str, settings: &Settings) -> SharedString {
+    match name {
+        i18n::SYSTEM => tr_with!(
+            "language-system",
+            language = i18n::detected(&settings.languages)
+        ),
+        SOUND_OFF => tr("sound-off"),
+        THEME_BOARD => tr("board-follows-theme"),
+        "dark" => tr("theme-dark"),
+        "light" => tr("theme-light"),
+        name => title_case(name).into(),
+    }
+}
+
+/// The stop nearest to a stored value, which may be hand-written.
+fn stop_of(stops: &[f64], value: f64) -> usize {
+    let distance = |stop: usize| (stops[stop] - value).abs();
+    (0..stops.len())
+        .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+        .unwrap_or(0)
+}
+
+/// Fetches an engine and says which settings now point at it.
+fn install(
+    engine: Engine,
+    root: &std::path::Path,
+    progress: &mut dyn FnMut(f32),
+) -> Result<Vec<(&'static str, PathBuf)>, String> {
+    match engine {
+        Engine::Stockfish => {
+            let program = download::install_stockfish(root, progress)?;
+            Ok(vec![("stockfish", program)])
+        }
+        Engine::Maia => {
+            let (lc0, weights) = download::install_maia(root, progress)?;
+            Ok(vec![("lc0", lc0), ("maia_weights", weights)])
+        }
+    }
+}
+
+impl SettingsView {
+    fn write(key: &str, value: impl Into<toml_edit::Value>, cx: &mut Context<Self>) {
+        match Settings::store(key, value) {
+            Ok(()) => cx.emit(Event::Changed),
+            Err(error) => cx.emit(Event::Failed(
+                tr_with!("error-save-setting", error = error).to_string(),
+            )),
+        }
+    }
+
+    fn select(
+        &self,
+        id: &'static str,
+        label: SharedString,
+        current: &str,
+        choices: &[String],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = Settings::get(cx);
+        let is_open = self.open_select == Some(id);
+        let button = ui::select_button(id, shown(current, &settings), None, is_open, &settings)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    this.open_select = (!is_open).then_some(id);
+                    cx.notify();
+                }),
+            );
+        let list = is_open.then(|| {
+            let rows = choices.iter().enumerate().map(|(index, name)| {
+                let value = name.clone();
+                ui::list_row(("choice", index), name == current, &settings)
+                    .text_color(settings.colors.text)
+                    .child(div().truncate().child(shown(name, &settings)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_select = None;
+                        Self::write(id, value.as_str(), cx);
+                        if id == "sound_pack" {
+                            audio::preview(&value, Settings::get(cx).sound_volume, cx);
+                        }
+                        cx.notify();
+                    }))
+            });
+            ui::select_dropdown(
+                ui::popover(window, &settings)
+                    .id("list")
+                    .occlude()
+                    .w(ui::SELECT_WIDTH)
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.open_select = None;
+                        cx.notify();
+                    }))
+                    .children(rows),
+            )
+        });
+        ui::setting_row(label, None, &settings)
+            .child(div().child(button).children(list))
+            .into_any_element()
+    }
+
+    /// A row with a stepped slider over numbers in the config file.
+    fn number(
+        key: &'static str,
+        label: SharedString,
+        (stops, value): (&'static [f64], f64),
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = Settings::get(cx);
+        let view = cx.weak_entity();
+        let index = stop_of(stops, value);
+        let slider = ui::slider(
+            key,
+            stops.len(),
+            index,
+            &settings,
+            window,
+            cx,
+            move |stop, _, cx| {
+                let _ = view.update(cx, |_, cx| {
+                    Self::write(key, stops[stop], cx);
+                    if key == "sound_volume" {
+                        let pack = Settings::get(cx).sound_pack.clone();
+                        audio::preview(&pack, stops[stop] as f32, cx);
+                    }
+                });
+            },
+        );
+        ui::setting_row(label, Some(text.into()), &settings)
+            .child(slider)
+            .into_any_element()
+    }
+
+    fn switch(
+        key: &'static str,
+        label: SharedString,
+        hint: SharedString,
+        on: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = Settings::get(cx);
+        ui::setting_row(label, Some(hint), &settings)
+            .child(ui::toggle(key, on, window, &settings).on_click(cx.listener(
+                move |_, _, _, cx| {
+                    Self::write(key, !on, cx);
+                },
+            )))
+            .into_any_element()
+    }
+
+    fn appearance(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        vec![
+            self.select(
+                "language",
+                tr("language"),
+                &settings.language,
+                &settings.language_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "theme",
+                tr("theme"),
+                &settings.theme,
+                &settings.theme_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "piece_set",
+                tr("pieces"),
+                &settings.piece_set,
+                &settings.piece_set_names,
+                window,
+                cx,
+            ),
+            Self::number(
+                "ui_font_size",
+                tr("font-size"),
+                (&FONT_SIZES, f64::from(settings.ui_font_px)),
+                tr_with!("pixels", value = settings.ui_font_px).to_string(),
+                window,
+                cx,
+            ),
+            Self::number(
+                "corner_radius",
+                tr("corner-radius"),
+                (&CORNER_RADII, f64::from(settings.corner_radius_px)),
+                tr_with!("pixels", value = settings.corner_radius_px).to_string(),
+                window,
+                cx,
+            ),
+        ]
+    }
+
+    fn board(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        vec![
+            self.select(
+                "board",
+                tr("board"),
+                &settings.board_name,
+                &settings.board_names,
+                window,
+                cx,
+            ),
+            Self::number(
+                "board_size",
+                tr("board-size"),
+                (&BOARD_SIZES, f64::from(settings.board_size)),
+                tr_with!(
+                    "board-size-value",
+                    percent = (settings.board_size * 100.).round() as u32
+                )
+                .to_string(),
+                window,
+                cx,
+            ),
+            Self::switch(
+                "animate_moves",
+                tr("animate-moves"),
+                tr("animate-moves-hint"),
+                settings.animate_moves,
+                window,
+                cx,
+            ),
+        ]
+    }
+
+    fn sound(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let percent = (settings.sound_volume * 100.).round() as u32;
+        vec![
+            self.select(
+                "sound_pack",
+                tr("sound-pack"),
+                &settings.sound_pack,
+                &settings.sound_pack_names,
+                window,
+                cx,
+            ),
+            Self::number(
+                "sound_volume",
+                tr("volume"),
+                (&VOLUMES, f64::from(settings.sound_volume)),
+                tr_with!("volume-value", percent = percent).to_string(),
+                window,
+                cx,
+            ),
+        ]
+    }
+
+    /// Starts fetching an engine, reporting progress as it goes.
+    fn download(&mut self, engine: Engine, cx: &mut Context<Self>) {
+        let Some(root) = Settings::engines_dir() else {
+            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
+            return;
+        };
+        self.downloading = Some((engine, 0.));
+        cx.notify();
+        let (updates, incoming) = mpsc::channel();
+        cx.background_spawn(async move {
+            let progress = updates.clone();
+            let installed = install(engine, &root, &mut |done| {
+                let _ = progress.send(Update::Progress(done));
+            });
+            let _ = updates.send(Update::Done(installed));
+        })
+        .detach();
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(PROGRESS_TICK).await;
+                for update in incoming.try_iter() {
+                    let finished = matches!(update, Update::Done(_));
+                    if this
+                        .update(cx, |this, cx| this.on_update(update, cx))
+                        .is_err()
+                        || finished
+                    {
+                        return;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn on_update(&mut self, update: Update, cx: &mut Context<Self>) {
+        match update {
+            Update::Progress(done) => {
+                if let Some((_, progress)) = &mut self.downloading {
+                    *progress = done;
+                }
+            }
+            Update::Done(Ok(paths)) => {
+                self.downloading = None;
+                for (key, path) in paths {
+                    Self::write(key, path.to_string_lossy().as_ref(), cx);
+                }
+            }
+            Update::Done(Err(error)) => {
+                self.downloading = None;
+                cx.emit(Event::Failed(
+                    tr_with!("error-download", error = error).to_string(),
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Asks for a program or folder, and stores it under `key`.
+    fn choose_path(key: &'static str, directories: bool, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: !directories,
+            directories,
+            multiple: false,
+            prompt: Some(tr("choose")),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = paths.await
+                && let Some(path) = paths.first()
+            {
+                let path = path.to_string_lossy().into_owned();
+                this.update(cx, |_, cx| Self::write(key, path.as_str(), cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// An engine's row: whether it's ready, and how to get or point at it.
+    fn engine_row(
+        &self,
+        engine: Engine,
+        kind: OpponentKind,
+        can_download: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = Settings::get(cx);
+        let missing = kind.missing(&settings);
+        let hint: SharedString = match (&self.downloading, &missing) {
+            (Some((fetching, done)), _) if *fetching == engine => {
+                tr_with!("downloading", percent = (done * 100.).round() as u32)
+            }
+            (_, Some(missing)) => missing.clone().into(),
+            (_, None) => tr("installed"),
+        };
+        let busy = self.downloading.is_some();
+        let (id, key) = match engine {
+            Engine::Stockfish => ("download-stockfish", "stockfish"),
+            Engine::Maia => ("download-maia", "lc0"),
+        };
+        let label = tr(if missing.is_some() {
+            "download"
+        } else {
+            "update"
+        });
+        let fetching = self
+            .downloading
+            .is_some_and(|(fetching, _)| fetching == engine);
+        let download = if fetching {
+            ui::busy_button(id, label.clone(), &settings).into_any_element()
+        } else if can_download && !busy {
+            ui::action_button(id, label.clone(), &settings)
+                .on_click(cx.listener(move |this, _, _, cx| this.download(engine, cx)))
+                .into_any_element()
+        } else {
+            ui::disabled_button(id, label, &settings).into_any_element()
+        };
+        let choose = ui::action_button(("choose", id.len()), tr("choose-program"), &settings)
+            .on_click(cx.listener(move |_, _, _, cx| Self::choose_path(key, false, cx)));
+        ui::setting_row(kind.name(), Some(hint), &settings)
+            .child(div().flex().gap_1().child(choose).child(download))
+            .into_any_element()
+    }
+
+    fn engines(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let mut rows = vec![
+            self.engine_row(
+                Engine::Stockfish,
+                OpponentKind::Stockfish,
+                can_download_stockfish(),
+                cx,
+            ),
+            self.engine_row(Engine::Maia, OpponentKind::Maia, can_download_lc0(), cx),
+        ];
+        let weights = settings.maia_weights.display().to_string();
+        let hint: SharedString = if weights.is_empty() {
+            tr("not-set")
+        } else {
+            weights.into()
+        };
+        rows.push(
+            ui::setting_row(tr("maia-networks"), Some(hint), &settings)
+                .child(
+                    ui::action_button("choose-weights", tr("choose-folder"), &settings).on_click(
+                        cx.listener(|_, _, _, cx| Self::choose_path("maia_weights", true, cx)),
+                    ),
+                )
+                .into_any_element(),
+        );
+        rows
+    }
+
+    /// Installs an agent's adapter, off the UI thread.
+    fn install_adapter(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
+        let Some(folder) = Settings::adapters_dir() else {
+            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
+            return;
+        };
+        self.installing = Some(kind);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let installed = cx
+                .background_spawn(async move { adapters::install(kind, &folder) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.installing = None;
+                match installed {
+                    Ok(()) => cx.emit(Event::Changed),
+                    Err(error) => cx.emit(Event::Failed(
+                        tr_with!("error-install", error = error).to_string(),
+                    )),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Whether each agent can play, and the way there if it can't yet.
+    fn agents(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let folder = Settings::adapters_dir().unwrap_or_default();
+        AgentKind::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| {
+                let state = adapters::readiness(kind, &folder);
+                let installing = self.installing == Some(kind);
+                let hint: SharedString = match state {
+                    _ if installing => tr("installing-adapter"),
+                    Readiness::Ready => tr("installed"),
+                    Readiness::NoAdapter => tr("adapter-missing"),
+                    Readiness::NoNode => tr("needs-node"),
+                    Readiness::NoProgram(program) => {
+                        tr_with!("program-not-found", program = program)
+                    }
+                };
+                let can_install = state == Readiness::NoAdapter;
+                let button = can_install.then(|| {
+                    if installing {
+                        ui::busy_button(("install", index), tr("install"), &settings)
+                            .into_any_element()
+                    } else if self.installing.is_some() {
+                        ui::disabled_button(("install", index), tr("install"), &settings)
+                            .into_any_element()
+                    } else {
+                        ui::action_button(("install", index), tr("install"), &settings)
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.install_adapter(kind, cx)),
+                            )
+                            .into_any_element()
+                    }
+                });
+                ui::setting_row(kind.name(), Some(hint), &settings)
+                    .children(button)
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    fn keys(cx: &App) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        KEYS.into_iter()
+            .map(|(action, key)| {
+                ui::setting_row(tr(action), None, &settings)
+                    .child(div().text_color(settings.colors.muted).child(key))
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    fn plugins(cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let folder = ui::setting_row(
+            tr("plugins-folder"),
+            Some(tr("plugins-folder-hint")),
+            &settings,
+        )
+        .child(
+            ui::action_button("open-plugins", tr("open"), &settings).on_click(cx.listener(
+                |_, _, _, cx| {
+                    if let Some(folder) = Settings::plugins_dir() {
+                        cx.open_with_system(&folder);
+                    }
+                },
+            )),
+        );
+        let heading = div()
+            .pt_4()
+            .text_color(settings.colors.muted)
+            .child(tr("installed-plugins"));
+        let row = |name: &str, plugin: &str, license: &str| {
+            let hint = format!("{plugin}, {license}");
+            ui::setting_row(name.to_owned(), Some(hint.into()), &settings).into_any_element()
+        };
+        let mut rows = vec![folder.into_any_element(), heading.into_any_element()];
+        rows.extend(
+            settings
+                .piece_sets
+                .iter()
+                .map(|set| row(&set.name, &set.plugin, &set.license)),
+        );
+        rows.extend(
+            settings
+                .themes
+                .iter()
+                .map(|theme| row(&theme.name, &theme.plugin, &theme.license)),
+        );
+        rows.extend(
+            settings
+                .board_themes
+                .iter()
+                .map(|board| row(&board.name, &board.plugin, &board.license)),
+        );
+        rows.extend(
+            settings
+                .sound_packs
+                .iter()
+                .map(|pack| row(&pack.name, &pack.plugin, &pack.license)),
+        );
+        rows.extend(
+            settings
+                .languages
+                .iter()
+                .map(|language| row(&language.name, &language.plugin, &language.license)),
+        );
+        rows
+    }
+
+    /// The pages, for the sidebar's place.
+    pub fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let settings = Settings::get(cx);
+        let rows = SettingsPage::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, page)| {
+                ui::list_row(("page", index), page == self.page, &settings)
+                    .text_color(settings.colors.text)
+                    .child(page.title())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.page = page;
+                        cx.notify();
+                    }))
+            });
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_1()
+            .gap_0p5()
+            .children(rows)
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .p_1()
+                    .child(
+                        ui::button("open-file", false, &settings)
+                            .h(ui::CONTROL_HEIGHT)
+                            .on_click(cx.listener(|_, _, _, cx| match Settings::config_file() {
+                                Ok(path) => cx.open_with_system(&path),
+                                Err(error) => cx.emit(Event::Failed(error)),
+                            }))
+                            .child(tr("open-toml")),
+                    )
+                    .child(
+                        ui::button("close", true, &settings)
+                            .h(ui::CONTROL_HEIGHT)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(Event::Close)))
+                            .child(tr("close")),
+                    ),
+            )
+    }
+
+    /// The current page, for the board's place.
+    pub fn render_content(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let settings = Settings::get(cx);
+        let rows = match self.page {
+            SettingsPage::Appearance => self.appearance(window, cx),
+            SettingsPage::Board => self.board(window, cx),
+            SettingsPage::Sound => self.sound(window, cx),
+            SettingsPage::Engines => self.engines(cx),
+            SettingsPage::Agents => self.agents(cx),
+            SettingsPage::Keys => Self::keys(cx),
+            SettingsPage::Plugins => Self::plugins(cx),
+        };
+        div()
+            .id("settings-content")
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .px_6()
+            .py_4()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .max_w(CONTENT_WIDTH)
+                    .gap_1()
+                    .child(ui::title(self.page.title(), &settings))
+                    .children(rows),
+            )
+    }
+}
+
+/// Opens the settings as a view, on `page`.
+pub fn page(page: SettingsPage, cx: &mut App) -> Entity<SettingsView> {
+    cx.new(|_| SettingsView {
+        page,
+        open_select: None,
+        downloading: None,
+        installing: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hand_written_value_finds_the_nearest_stop() {
+        assert_eq!(stop_of(&BOARD_SIZES, 0.8), 6);
+        assert_eq!(stop_of(&BOARD_SIZES, 0.82), 6);
+        assert_eq!(stop_of(&BOARD_SIZES, 2.), BOARD_SIZES.len() - 1);
+    }
+}

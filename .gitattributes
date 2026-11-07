@@ -1,0 +1,7 @@
+# LF everywhere, whatever `core.autocrlf` says on the machine.
+* text=auto eol=lf
+*.ttf binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.ogg binary

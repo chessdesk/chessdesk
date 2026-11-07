@@ -1,0 +1,10 @@
+# By Colin M.L. Burnett, GPLv2+. These SVGs are the ones Lichess ships:
+# https://github.com/lichess-org/lila/tree/master/public/piece/cburnett
+name = "cburnett"
+version = "1.0.0"
+description = "The Cburnett chess pieces"
+license = "GPL-2.0-or-later"
+
+[[pieces]]
+name = "Cburnett"
+dir = "svg"

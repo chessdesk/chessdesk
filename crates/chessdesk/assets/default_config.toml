@@ -1,0 +1,41 @@
+# Chessdesk settings. Saving this file applies them immediately.
+# Anything left out keeps the default shown here.
+
+# "dark", "light", a theme from a plugin such as "Mariana",
+# or the name of <config dir>/themes/<name>.toml
+theme = "dark"
+# A set from a plugin: "Cburnett", "Merida" or any you add.
+piece_set = "Cburnett"
+# "Theme" follows the colour theme; "Wood", "Green", "Marble" or any you add look the same in all.
+board = "Theme"
+
+# "System" follows the system's language where a plugin has it; else "English",
+# "Deutsch", "Español", "Français" or any you add.
+language = "System"
+
+# A pack from a plugin: "Wood", "Soft" or any you add, or "Off".
+sound_pack = "Wood"
+sound_volume = 0.7             # from 0 to 1
+
+ui_font_family = "Geist"
+ui_font_size = 12.0
+ui_font_weight = 400.0
+
+board_size = 0.8               # of the room there is, from 0.5 to 1
+animate_moves = true           # glide opponent moves and stepping through a game
+
+corner_radius = 4.0            # buttons, list rows
+popover_radius_extra = 2.0     # added for menus and dialogs, which look less round
+history_width = 240.0          # the game history; drag its divider to change it
+panel_width = 300.0            # the game panel; drag its divider too
+log_height = 200.0             # the moves in the game panel; drag the divider above them
+window_width = 1280.0          # takes effect on restart
+window_height = 760.0
+
+stockfish = "stockfish"        # a program on PATH, or a full path
+lc0 = "lc0"                    # plays Maia
+maia_weights = ""              # the folder holding maia-1100.pb.gz to maia-1900.pb.gz
+
+# Override single colours of the theme:
+# [colors]
+# background = "#101010"

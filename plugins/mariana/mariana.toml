@@ -1,0 +1,22 @@
+# Mariana: the colours of Sublime Text's Mariana colour scheme, in Chessdesk's theme format.
+background = "#303841"
+accent = "#424d58"
+popover = "#2a3139"
+popover_border = "#444c55"
+text = "#d8dee9"
+muted = "#7b8795"
+icon = "#647382"
+caret = "#f9ae58"
+callout = "#ee932b"
+keyword = "#c695c6"
+string = "#99c794"
+comment = "#a6acb9"
+function = "#5fb4b4"
+type = "#6699cc"
+number = "#f9ae58"
+constant = "#ec5f66"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#242a31", "#ec5f66", "#99c794", "#fac761", "#6699cc", "#c695c6", "#5fb4b4", "#d8dee9",
+    "#647382", "#f97b58", "#aedaa9", "#fbd588", "#8db8e2", "#dbb3db", "#86cbcb", "#f7f7f7",
+]

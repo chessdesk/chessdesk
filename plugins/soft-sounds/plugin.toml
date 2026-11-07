@@ -1,0 +1,9 @@
+# Made for Chessdesk: struck wood and a marimba, modelled rather than recorded.
+name = "soft-sounds"
+version = "1.0.0"
+description = "Soft, rounded taps and a marimba"
+license = "GPL-3.0-or-later"
+
+[[sounds]]
+name = "Soft"
+dir = "sounds"

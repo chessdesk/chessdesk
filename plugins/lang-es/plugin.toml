@@ -1,0 +1,9 @@
+name = "lang-es"
+version = "1.5.0"
+description = "Chessdesk en español"
+license = "GPL-3.0-or-later"
+
+[[languages]]
+name = "Español"
+locale = "es"
+file = "es.ftl"

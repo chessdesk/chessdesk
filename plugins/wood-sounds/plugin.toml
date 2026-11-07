@@ -1,0 +1,10 @@
+# Moves are real wood knocks from Kenney's Impact Sounds, CC0: https://kenney.nl/assets/impact-sounds
+# The moments of a game are marimba phrases made for Chessdesk.
+name = "wood-sounds"
+version = "1.0.0"
+description = "Wood on wood, with a marimba for the moments of a game"
+license = "GPL-3.0-or-later"
+
+[[sounds]]
+name = "Wood"
+dir = "sounds"

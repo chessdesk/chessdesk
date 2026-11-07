@@ -1,0 +1,12 @@
+# The board Lichess calls blue-marble, by the lila authors and pirouetti, AGPLv3+:
+# https://github.com/lichess-org/lila/tree/master/public/images/board
+name = "marble-board"
+version = "1.0.0"
+description = "Ivory and blue-grey marble"
+license = "AGPL-3.0-or-later"
+
+[[boards]]
+name = "Marble"
+image = "board.jpg"
+light = "#eae6dd"
+dark = "#7c7f87"

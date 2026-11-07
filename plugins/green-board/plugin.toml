@@ -1,0 +1,10 @@
+name = "green-board"
+version = "1.0.0"
+description = "The classic green tournament board"
+license = "GPL-3.0-or-later"
+
+[[boards]]
+name = "Green"
+image = "board.jpg"
+light = "#ebecd0"
+dark = "#739552"

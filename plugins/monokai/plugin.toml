@@ -1,0 +1,8 @@
+name = "monokai"
+version = "1.0.0"
+description = "Colours of Sublime Text's Monokai scheme"
+license = "GPL-3.0-or-later"
+
+[[themes]]
+name = "Monokai"
+file = "monokai.toml"

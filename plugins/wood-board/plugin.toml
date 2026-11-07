@@ -1,0 +1,12 @@
+# The board Lichess calls wood4, by the lila authors and pirouetti, AGPLv3+:
+# https://github.com/lichess-org/lila/tree/master/public/images/board
+name = "wood-board"
+version = "1.1.0"
+description = "An inlaid wooden board"
+license = "AGPL-3.0-or-later"
+
+[[boards]]
+name = "Wood"
+image = "board.jpg"
+light = "#c09e69"
+dark = "#865b36"

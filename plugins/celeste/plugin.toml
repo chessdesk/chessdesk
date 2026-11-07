@@ -1,0 +1,8 @@
+name = "celeste"
+version = "1.0.0"
+description = "Colours of Sublime Text's Celeste scheme"
+license = "GPL-3.0-or-later"
+
+[[themes]]
+name = "Celeste"
+file = "celeste.toml"

@@ -1,0 +1,21 @@
+background = "#172020"
+accent = "#243232"
+popover = "#1b2525"
+popover_border = "#232f2f"
+text = "#d6e0dd"
+muted = "#6b7f7d"
+icon = "#56726f"
+caret = "#7fd4c8"
+callout = "#e8a05c"
+keyword = "#86cfc3"
+string = "#b6cb92"
+comment = "#6b7f7d"
+function = "#95bfdc"
+type = "#d9c08e"
+number = "#dfa58d"
+constant = "#dfa58d"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#2a3838", "#df8a8a", "#a9c48a", "#d9c08e", "#8fb4d9", "#c0a2d6", "#7fd4c8", "#c5d0cd",
+    "#56726f", "#eca0a0", "#bcd8a0", "#e8d2a4", "#a8c8e8", "#d2b8e4", "#9ce4da", "#e8efec",
+]

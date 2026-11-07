@@ -1,0 +1,52 @@
+# Keeps the repository tidy. `just hooks` installs this; `prek run --all-files` runs it by hand.
+#:schema https://www.schemastore.org/prek.json
+
+default_install_hook_types = ["pre-commit", "pre-push"]
+
+# Third-party files stay exactly as they came: licences, piece sets, icons and fonts.
+exclude = '^(LICENSE|plugins/[^/]+/svg/|crates/chessdesk/assets/(fonts|icons)/)'
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "mixed-line-ending", args = ["--fix=lf"] },
+    { id = "check-merge-conflict" },
+    { id = "check-case-conflict" },
+    { id = "check-toml" },
+    { id = "check-yaml" },
+    { id = "detect-private-key" },
+    { id = "check-added-large-files", args = ["--maxkb=512"] },
+]
+
+# Fast enough for every commit.
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt --all --check"
+types = ["rust"]
+pass_filenames = false
+
+# These need a build, so they wait for a push.
+[[repos.hooks]]
+id = "lint"
+name = "cargo clippy"
+language = "system"
+entry = "just lint"
+pass_filenames = false
+always_run = true
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "test"
+name = "cargo test"
+language = "system"
+entry = "just test"
+pass_filenames = false
+always_run = true
+stages = ["pre-push"]
