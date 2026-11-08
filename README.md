@@ -34,6 +34,9 @@ trained on human games, so it makes human mistakes.
 each of your moves against an engine. Hint shows you a good move when you're stuck: from Stockfish,
 which costs no tokens, or in a game against an agent from any agent, which says why.
 
+**Pick the kind of game.** A casual game has hints, take-backs and tutoring. A competition is
+on the clock, from bullet (1+0) to classical (90+30), with no help at all.
+
 **Go back over your games.** Every game is saved as you play. Open one from the sidebar and press
 Analyze: an agent goes through your moves one by one and explains them, or Stockfish checks each
 move and marks your mistakes. The bar and graph show how the game swung. Notes you write next to a

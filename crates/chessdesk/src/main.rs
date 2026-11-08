@@ -15,6 +15,7 @@ mod models;
 mod new_game;
 mod onboarding;
 mod reset;
+mod scenario;
 mod settings;
 mod settings_view;
 mod setup;

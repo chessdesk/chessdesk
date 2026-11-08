@@ -332,6 +332,8 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
             .py_1()
             .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
             .bg(color.opacity(ui::CARD_TINT))
+            .border_1()
+            .border_color(ui::card_edge(settings))
             .text_color(color)
             .child(format!("{text}{}", ending.unwrap_or_default())),
     )
@@ -353,6 +355,8 @@ fn render_hint(note: &HintNote, settings: &Settings) -> Div {
         .py_1()
         .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
         .bg(color.opacity(ui::CARD_TINT))
+        .border_1()
+        .border_color(ui::card_edge(settings))
         .child(
             div()
                 .flex()
@@ -405,6 +409,8 @@ fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
         .py_1()
         .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
         .bg(color.opacity(ui::CARD_TINT))
+        .border_1()
+        .border_color(ui::card_edge(settings))
         .child(
             div()
                 .flex()
@@ -1187,8 +1193,17 @@ impl Chessdesk {
             }
         };
         if let Some(live) = &session.live {
-            let first = if live.paused.is_some() {
+            let resign =
+                wide("resign", "resign").on_click(cx.listener(|this, _, _, cx| this.resign(cx)));
+            let resume = live.paused.is_some().then(|| {
                 wide("resume", "continue").on_click(cx.listener(|this, _, _, cx| this.resume(cx)))
+            });
+            // A competition has no help to offer: no hint, no take-back.
+            if !live.setup.assisted() {
+                return buttons.children(resume).child(resign);
+            }
+            let first = if let Some(resume) = resume {
+                resume
             } else if live.thinking || session.suggesting {
                 // The answer under way is for the position on the board.
                 ui::disabled_button("take-back", tr("take-back"), &settings).w_full()
@@ -1217,9 +1232,7 @@ impl Chessdesk {
                     .w_full()
                     .into_any_element()
             };
-            buttons = buttons.child(hint).child(first).child(
-                wide("resign", "resign").on_click(cx.listener(|this, _, _, cx| this.resign(cx))),
-            );
+            buttons = buttons.child(hint).child(first).child(resign);
         } else {
             let played = !session.game.moves().is_empty();
             let optimal = played.then(|| suggest("optimal-move", cx));

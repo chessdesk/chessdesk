@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use shakmaty::{Chess, Color};
 
 use crate::i18n::{self, tr, tr_with};
+use crate::scenario;
 use crate::settings::Settings;
 
 /// Which side the player takes.
@@ -24,6 +25,39 @@ pub enum Side {
     White,
     Black,
     Random,
+}
+
+/// What kind of game: how much help there is, and where it starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mode {
+    /// Hints, take-backs and tutoring, with or without a clock.
+    #[default]
+    Casual,
+    /// On the clock and on your own.
+    Competition,
+    /// From a set position, with the help of a casual game.
+    Scenario,
+}
+
+/// How fast a clock is, split as Lichess does by how long a game of 40 moves takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Speed {
+    Bullet,
+    Blitz,
+    Rapid,
+    Classical,
+}
+
+impl Speed {
+    /// `None` for no clock, which no minutes are.
+    pub fn of(minutes: u32, increment: u32) -> Option<Self> {
+        (minutes > 0).then(|| match minutes * 60 + increment * 40 {
+            ..180 => Self::Bullet,
+            180..480 => Self::Blitz,
+            480..1500 => Self::Rapid,
+            _ => Self::Classical,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +181,7 @@ pub fn title_case(text: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Setup {
+    pub mode: Mode,
     pub side: Side,
     pub opponent: OpponentKind,
     /// As the agent knows it; `None` is the agent's own default.
@@ -162,7 +197,7 @@ pub struct Setup {
     /// Minutes each, and seconds added per move. No minutes is no clock.
     pub minutes: u32,
     pub increment: u32,
-    /// Where to start, if not from the usual position.
+    /// Where a casual game or a scenario starts, if not from the usual position.
     pub fen: Option<String>,
     /// Tokens after which the game pauses, for agents that report them.
     pub token_budget: Option<u64>,
@@ -173,6 +208,7 @@ pub struct Setup {
 impl Default for Setup {
     fn default() -> Self {
         Self {
+            mode: Mode::Casual,
             side: Side::White,
             opponent: OpponentKind::Stockfish,
             model: None,
@@ -223,10 +259,38 @@ impl Setup {
         }
     }
 
+    /// Switches to `mode`, bringing along what it can't do without: a clock for a
+    /// competition, a position for a scenario.
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        match mode {
+            Mode::Competition if self.minutes == 0 => (self.minutes, self.increment) = (5, 3),
+            Mode::Scenario if self.fen.is_none() => {
+                let first = &scenario::ALL[0];
+                self.fen = Some(first.fen.to_owned());
+                self.side = first.side;
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the player may have help: hints, take-backs, tutoring and the likelihood.
+    pub fn assisted(&self) -> bool {
+        self.mode != Mode::Competition
+    }
+
     /// Whether the player's moves get a verdict from Stockfish: tutoring without an agent
     /// to do the talking.
     pub fn grades_moves(&self) -> bool {
-        self.annotate && self.opponent.agent().is_none()
+        self.tutoring() && self.opponent.agent().is_none()
+    }
+
+    fn tutoring(&self) -> bool {
+        self.annotate && self.assisted()
+    }
+
+    pub fn shows_likelihood(&self) -> bool {
+        self.live_likelihood && self.assisted()
     }
 
     pub fn clock(&self) -> Option<(Duration, Duration)> {
@@ -239,9 +303,10 @@ impl Setup {
     }
 
     pub fn start_position(&self) -> Option<Chess> {
-        match &self.fen {
-            Some(fen) => Game::parse_fen(fen),
-            None => Some(Chess::default()),
+        match (self.mode, &self.fen) {
+            // A competition starts as every game does.
+            (Mode::Competition, _) | (_, None) => Some(Chess::default()),
+            (_, Some(fen)) => Game::parse_fen(fen),
         }
     }
 
@@ -282,7 +347,7 @@ impl Setup {
             Some(config) => OpponentPlan::Agent {
                 config,
                 side: opponent_color,
-                annotate: self.annotate,
+                annotate: self.tutoring(),
             },
             None if self.opponent == OpponentKind::Maia => {
                 let weights = settings
@@ -362,10 +427,50 @@ mod tests {
     #[test]
     fn a_bad_fen_is_no_position() {
         let setup = Setup {
+            mode: Mode::Scenario,
             fen: Some("not a position".to_owned()),
             ..Setup::default()
         };
         assert!(setup.start_position().is_none());
+    }
+
+    #[test]
+    fn a_competition_starts_from_the_usual_position() {
+        let mut setup = Setup {
+            fen: Some("8/8/8/4k3/8/8/8/3QK3 w - - 0 1".to_owned()),
+            ..Setup::default()
+        };
+        assert_ne!(setup.start_position().unwrap(), Chess::default());
+        setup.set_mode(Mode::Competition);
+        assert_eq!(setup.start_position().unwrap(), Chess::default());
+    }
+
+    #[test]
+    fn a_competition_has_a_clock_and_no_help() {
+        let mut setup = Setup {
+            live_likelihood: true,
+            ..Setup::default()
+        };
+        setup.set_mode(Mode::Competition);
+        assert!(setup.clock().is_some());
+        assert!(!setup.grades_moves());
+        assert!(!setup.shows_likelihood());
+        // What casual games had on stays for the next one.
+        setup.set_mode(Mode::Casual);
+        assert!(setup.grades_moves());
+        assert!(setup.shows_likelihood());
+    }
+
+    #[test]
+    fn clocks_are_as_fast_as_on_lichess() {
+        assert_eq!(Speed::of(0, 0), None);
+        assert_eq!(Speed::of(1, 0), Some(Speed::Bullet));
+        assert_eq!(Speed::of(2, 1), Some(Speed::Bullet));
+        assert_eq!(Speed::of(3, 0), Some(Speed::Blitz));
+        assert_eq!(Speed::of(5, 3), Some(Speed::Blitz));
+        assert_eq!(Speed::of(10, 0), Some(Speed::Rapid));
+        assert_eq!(Speed::of(15, 10), Some(Speed::Rapid));
+        assert_eq!(Speed::of(30, 0), Some(Speed::Classical));
     }
 
     #[test]

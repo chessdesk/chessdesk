@@ -236,7 +236,7 @@ impl Session {
     /// something to show in a replay.
     pub fn shows_likelihood(&self) -> bool {
         match &self.live {
-            Some(live) => live.setup.live_likelihood,
+            Some(live) => live.setup.shows_likelihood(),
             None => self
                 .game
                 .moves()
@@ -289,7 +289,7 @@ impl Session {
     pub fn wants_evaluations(&self) -> bool {
         self.live
             .as_ref()
-            .is_some_and(|live| live.setup.live_likelihood || live.setup.grades_moves())
+            .is_some_and(|live| live.setup.shows_likelihood() || live.setup.grades_moves())
     }
 
     /// How the player's latest move up to the one on show rated, once it has.

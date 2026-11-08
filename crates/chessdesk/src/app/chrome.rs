@@ -100,15 +100,22 @@ fn update_label(update: &AppUpdate) -> Option<SharedString> {
 /// Entries of a menu; `None` is a separator.
 fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Option<Entry>> {
     match index {
-        0 => vec![
-            Some(action("new-game", Some("Ctrl+N"), &NewGameAction)),
-            Some(action("open-game", Some("Ctrl+O"), &OpenGame)),
-            Some(action("save-game-as", Some("Ctrl+S"), &SaveGame)),
-            Some(action("export-game", Some("Ctrl+E"), &ExportGame)),
-            None,
-            Some(action("take-back", Some("Ctrl+Z"), &TakeBack)),
-            Some(action("resign", None, &Resign)),
-        ],
+        0 => {
+            // A competition is played as it stands.
+            let assisted = session
+                .live
+                .as_ref()
+                .is_none_or(|live| live.setup.assisted());
+            vec![
+                Some(action("new-game", Some("Ctrl+N"), &NewGameAction)),
+                Some(action("open-game", Some("Ctrl+O"), &OpenGame)),
+                Some(action("save-game-as", Some("Ctrl+S"), &SaveGame)),
+                Some(action("export-game", Some("Ctrl+E"), &ExportGame)),
+                None,
+                assisted.then(|| action("take-back", Some("Ctrl+Z"), &TakeBack)),
+                Some(action("resign", None, &Resign)),
+            ]
+        }
         1 => {
             let mut entries = vec![Some(action("analyze-with-stockfish", None, &Analyze)), None];
             let folder = Settings::adapters_dir().unwrap_or_default();
@@ -154,7 +161,11 @@ fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Opti
                 Some(action("game-history", Some("Ctrl+B"), &ToggleHistory)),
                 Some(action("game-panel", Some("Ctrl+Shift+B"), &TogglePanel)),
             ];
-            if session.live.is_some() {
+            if session
+                .live
+                .as_ref()
+                .is_some_and(|live| live.setup.assisted())
+            {
                 let title = if session.shows_likelihood() {
                     "hide-win-likelihood"
                 } else {

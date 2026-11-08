@@ -3,6 +3,23 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.6.0 - 2026-11-08
+
+### Added
+
+- New Game has the kind of game down its side: Casual, with hints, take-backs and tutoring, or
+  Competition, on a bullet, blitz, rapid or classical clock with no help. Scenarios are coming soon
+- The clock in New Game says how fast it is: bullet, blitz, rapid or classical
+
+### Changed
+
+- Cards and notices have a faint edge, a shade off their fill
+- New Game keeps one height whichever kind of game is picked
+
+### Fixed
+
+- Changed translations reach installs that already have the language
+
 ## 2.5.0 - 2026-11-08
 
 ### Changed

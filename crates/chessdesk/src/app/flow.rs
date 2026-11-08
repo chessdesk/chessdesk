@@ -806,7 +806,7 @@ impl Chessdesk {
         let Some(live) = &session.live else {
             return;
         };
-        if live.thinking || session.suggesting {
+        if live.thinking || session.suggesting || !live.setup.assisted() {
             return;
         }
         // Back to the player's own turn.
@@ -958,6 +958,7 @@ impl Chessdesk {
         if let Some(live) = self
             .session_mut(id)
             .and_then(|session| session.live.as_mut())
+            .filter(|live| live.setup.assisted())
         {
             live.setup.live_likelihood = !live.setup.live_likelihood;
             self.evaluate_live(id, cx);
