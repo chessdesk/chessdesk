@@ -12,6 +12,7 @@ minor versions bring features, patch versions only fixes.
   that runs over pauses the game and says so in the error bar
 - In games against an agent, Hint offers Stockfish or any agent, as Analyze does. An agent's hint
   says why
+- Two boards: Canvas, woven cloth in slate blue and grey, and Maple, flamed maple and cherry
 
 ### Changed
 

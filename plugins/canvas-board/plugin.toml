@@ -1,0 +1,12 @@
+# The board Lichess calls canvas2, by the lila authors and pirouetti, AGPLv3+:
+# https://github.com/lichess-org/lila/tree/master/public/images/board
+name = "canvas-board"
+version = "1.0.0"
+description = "Woven canvas in slate blue and grey, like a cloth board"
+license = "AGPL-3.0-or-later"
+
+[[boards]]
+name = "Canvas"
+image = "board.jpg"
+light = "#cccfe0"
+dark = "#71809b"
