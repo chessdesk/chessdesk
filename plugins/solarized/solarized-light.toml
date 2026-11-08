@@ -1,0 +1,22 @@
+# Solarized Light: Ethan Schoonover's Solarized palette (MIT), in Chessdesk's theme format.
+background = "#fdf6e3"
+accent = "#eee8d5"
+popover = "#f7f0dc"
+popover_border = "#e6dfca"
+text = "#586e75"
+muted = "#93a1a1"
+icon = "#a8b2ae"
+caret = "#268bd2"
+callout = "#cb4b16"
+keyword = "#859900"
+string = "#2aa198"
+comment = "#93a1a1"
+function = "#268bd2"
+type = "#b58900"
+number = "#d33682"
+constant = "#6c71c4"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+    "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+]

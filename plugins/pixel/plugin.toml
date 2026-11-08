@@ -1,0 +1,10 @@
+# By therealqtpi, AGPLv3+. These SVGs are the ones Lichess ships:
+# https://github.com/lichess-org/lila/tree/master/public/piece/pixel
+name = "pixel"
+version = "1.0.0"
+description = "Pieces in 8-bit pixel art"
+license = "AGPL-3.0-or-later"
+
+[[pieces]]
+name = "Pixel"
+dir = "svg"

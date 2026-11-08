@@ -4,9 +4,10 @@
 # "dark", "light", a theme from a plugin such as "Mariana",
 # or the name of <config dir>/themes/<name>.toml
 theme = "dark"
-# A set from a plugin: "Cburnett", "Merida" or any you add.
+# A set from a plugin: "Cburnett", "Merida", "Chessnut", "Pixel" or any you add.
 piece_set = "Cburnett"
-# "Theme" follows the colour theme; "Wood", "Green", "Marble" or any you add look the same in all.
+# "Theme" follows the colour theme; "Wood", "Green", "Marble", "Newspaper" or any you add look the
+# same in all.
 board = "Theme"
 
 # "System" follows the system's language where a plugin has it; else "English",

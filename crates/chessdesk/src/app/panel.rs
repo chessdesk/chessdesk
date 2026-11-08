@@ -12,7 +12,7 @@ use chessdesk_players::adapters::{self, Readiness};
 use gpui::{
     AnyElement, Axis, Bounds, Context, Corner, Div, Hsla, MouseButton, MouseDownEvent, PathBuilder,
     Pixels, SharedString, Transformation, Window, anchored, canvas, deferred, div, percentage,
-    point, prelude::*, px, rgb,
+    point, prelude::*, px,
 };
 use shakmaty::{Color, Position};
 
@@ -27,7 +27,6 @@ use crate::ui::{self, Icon, Logo, Transition};
 
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
 /// White's side of the bar, whatever the theme does with light and dark.
-const WHITE_SIDE: u32 = 0xf0f0ee;
 /// A letter's width against the font size, for telling whether a label fits.
 const LABEL_LETTER_WIDTH: f32 = 0.56;
 /// From the bar's end to a label.
@@ -382,17 +381,6 @@ fn bar_label(label: SharedString, color: Hsla) -> Div {
         .child(label)
 }
 
-/// Black's side of the bar: a dark colour of the theme that stands out from the panel, which
-/// is the accent on dark themes, while on light ones it's the text.
-fn black_side(settings: &Settings) -> Hsla {
-    let colors = &settings.colors;
-    if colors.background.l < 0.5 {
-        colors.accent
-    } else {
-        colors.text
-    }
-}
-
 /// One bar for both sides, as on a chess site: White's part grows from the left, and it
 /// rests in the middle. With `None`, nothing is known and only the frame shows. The parts
 /// are round themselves, as a parent's rounding doesn't clip what's inside it.
@@ -408,8 +396,10 @@ fn likelihood_bar(white: Option<f32>, width: Pixels, settings: &Settings) -> Div
     let Some(white) = white else {
         return bar.bg(settings.colors.accent);
     };
-    let light: Hsla = rgb(WHITE_SIDE).into();
-    let dark = black_side(settings);
+    // The theme's own board colours: White and Black that belong to the theme, and labels that
+    // read on both without a stark black and white.
+    let (light, dark) = (settings.colors.board_light, settings.colors.board_dark);
+    let label = settings.colors.text;
     let (white_label, black_label) = (tr("side-white"), tr("side-black"));
     let shows_white = label_fits(&white_label, width * white, settings);
     let shows_black = label_fits(&black_label, width * (1. - white), settings);
@@ -423,10 +413,10 @@ fn likelihood_bar(white: Option<f32>, width: Pixels, settings: &Settings) -> Div
                 .bg(light),
         )
         .when(shows_white, |bar| {
-            bar.child(bar_label(white_label, dark).left(LABEL_PADDING))
+            bar.child(bar_label(white_label, label).left(LABEL_PADDING))
         })
         .when(shows_black, |bar| {
-            bar.child(bar_label(black_label, light).right(LABEL_PADDING))
+            bar.child(bar_label(black_label, label).right(LABEL_PADDING))
         })
 }
 
