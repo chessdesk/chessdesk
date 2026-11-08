@@ -3,6 +3,18 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.5.0 - 2026-11-08
+
+### Changed
+
+- An agent's hint shows as a card above the Hint button, naming the agent and the move
+- The Moves section of the game panel starts folded, leaving the opponent's words more room
+
+### Fixed
+
+- The instructions and the effort no longer squeeze the agent's comment in the game panel to a
+  line or two
+
 ## 2.4.0 - 2026-11-08
 
 ### Added

@@ -14,11 +14,12 @@ use chessdesk_players::analysis::evaluate_game;
 use chessdesk_players::uci::{Engine, EngineConfig, Limit};
 use chessdesk_players::{Decision, Opponent, PlayerError, Tokens};
 use gpui::{AppContext, Context, PathPromptOptions};
+use shakmaty::san::SanPlus;
 use shakmaty::{Color, KnownOutcome, Move, Outcome, Position, Role, Square};
 
 use super::Chessdesk;
 use super::clock::Clock;
-use super::session::{Live, Promotion, Session, SessionId, Suggestion};
+use super::session::{HintNote, Live, Promotion, Session, SessionId, Suggestion};
 use crate::audio;
 use crate::board::{SLIDE_TIME, Slide, slide_paths, slide_pieces};
 use crate::i18n::{self, tr, tr_with};
@@ -926,9 +927,15 @@ impl Chessdesk {
                 if let Some(tokens) = best.as_ref().and_then(|best| best.tokens) {
                     *session.tokens.get_or_insert_default() += tokens;
                 }
+                let position = session.game.position_at(ply);
                 session.suggestion = best.and_then(|best| {
                     let (from, to) = slide_paths(best.played).first().copied()?;
                     let text = best.annotations.text;
+                    let note = (!text.is_empty()).then(|| HintNote {
+                        by,
+                        san: SanPlus::from_move(position, best.played).to_string(),
+                        text,
+                    });
                     Some(Suggestion {
                         ply,
                         arrow: Arrow {
@@ -936,8 +943,7 @@ impl Chessdesk {
                             to,
                             mark: Mark::Blue,
                         },
-                        note: (!text.is_empty())
-                            .then(|| tr_with!("hint-note", agent = by, text = text)),
+                        note,
                     })
                 });
             }

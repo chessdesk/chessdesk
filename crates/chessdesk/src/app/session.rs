@@ -106,8 +106,18 @@ pub struct Feedback {
 pub struct Suggestion {
     pub ply: usize,
     pub arrow: Arrow,
-    /// Why, when an agent gave the hint: its words, after its name.
-    pub note: Option<SharedString>,
+    /// Why, when an agent gave the hint.
+    pub note: Option<HintNote>,
+}
+
+/// What an agent said with its hint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HintNote {
+    /// The agent's name.
+    pub by: &'static str,
+    /// The move it suggests, in SAN.
+    pub san: String,
+    pub text: String,
 }
 
 impl Session {
