@@ -4,14 +4,15 @@
 use std::borrow::Cow;
 use std::sync::{Arc, LazyLock};
 
+use chessdesk_players::acp::AgentKind;
 use gpui::{
-    AssetSource, Hsla, Image, ImageFormat, Img, Pixels, Result, SharedString, Svg, img, prelude::*,
-    svg,
+    AnyElement, AssetSource, Hsla, Image, ImageFormat, Pixels, Result, SharedString, Svg, img,
+    prelude::*, svg,
 };
 use shakmaty::Role;
 
 /// The logotype's width for its height.
-const LOGOTYPE_WIDTH: f32 = 211. / 43.;
+const LOGOTYPE_WIDTH: f32 = 255. / 30.;
 
 macro_rules! icons {
     ($($name:ident => $file:literal),* $(,)?) => {
@@ -43,8 +44,11 @@ icons! {
     ChessQueen => "chess-queen",
     ChessRook => "chess-rook",
     Close => "x",
+    // Agents' marks in a single colour, which takes the theme's.
+    CopilotLogo => "copilot",
     Logo => "logo",
     Logotype => "logotype",
+    OpenCodeLogo => "opencode",
     Spinner => "loader-circle",
     Warning => "triangle-alert",
     // The window controls' own, drawn lighter than the rest.
@@ -94,13 +98,28 @@ impl AssetSource for Assets {
     }
 }
 
-/// A project's own logo, in its own colours.
+/// A project's own logo: in its own colours, or in one for those that come in one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Logo {
     Stockfish,
     Maia,
     ClaudeCode,
     Codex,
+    Copilot,
+    OpenCode,
+    Pi,
+}
+
+impl Logo {
+    pub fn of_agent(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::ClaudeCode => Self::ClaudeCode,
+            AgentKind::Codex => Self::Codex,
+            AgentKind::Copilot => Self::Copilot,
+            AgentKind::OpenCode => Self::OpenCode,
+            AgentKind::Pi => Self::Pi,
+        }
+    }
 }
 
 fn logo_image(format: ImageFormat, bytes: &[u8]) -> Arc<Image> {
@@ -123,15 +142,27 @@ static CLAUDE_CODE: LazyLock<Arc<Image>> = LazyLock::new(|| {
 });
 static CODEX: LazyLock<Arc<Image>> =
     LazyLock::new(|| logo_image(ImageFormat::Png, include_bytes!("../../assets/codex.png")));
+static PI: LazyLock<Arc<Image>> =
+    LazyLock::new(|| logo_image(ImageFormat::Svg, include_bytes!("../../assets/pi.svg")));
 
-pub fn logo(logo: Logo, size: Pixels) -> Img {
-    let image = match logo {
-        Logo::Stockfish => STOCKFISH.clone(),
-        Logo::Maia => MAIA.clone(),
-        Logo::ClaudeCode => CLAUDE_CODE.clone(),
-        Logo::Codex => CODEX.clone(),
+/// `color` tints the logos that come in a single colour, so that they suit the theme.
+pub fn logo(logo: Logo, size: Pixels, color: Hsla) -> AnyElement {
+    let image = |image: &LazyLock<Arc<Image>>| {
+        img(Arc::clone(image))
+            .flex_none()
+            .size(size)
+            .into_any_element()
     };
-    img(image).flex_none().size(size)
+    let mark = |name| icon(name, size, color).into_any_element();
+    match logo {
+        Logo::Stockfish => image(&STOCKFISH),
+        Logo::Maia => image(&MAIA),
+        Logo::ClaudeCode => image(&CLAUDE_CODE),
+        Logo::Codex => image(&CODEX),
+        Logo::Copilot => mark(Icon::CopilotLogo),
+        Logo::OpenCode => mark(Icon::OpenCodeLogo),
+        Logo::Pi => image(&PI),
+    }
 }
 
 /// The name as drawn, crown and all, as wide as its proportions make it.

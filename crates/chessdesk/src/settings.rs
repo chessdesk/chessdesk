@@ -5,10 +5,12 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chessdesk_core::Mark;
 use chessdesk_core::plugins::{
-    self, BoardTheme, Language, PieceSet, Plugins, SoundPack, Theme, all_pieces, file_name,
+    self, BoardTheme, Font as LanguageFont, Language, PieceSet, Plugins, SoundPack, Theme,
+    all_pieces, file_name,
 };
 use gpui::{App, Font, FontFeatures, FontStyle, FontWeight, Global, Hsla, Image, ImageFormat};
 use gpui::{Pixels, Rgba, SharedString, px};
@@ -48,6 +50,7 @@ struct Config {
     log_height: f32,
     board_size: f32,
     animate_moves: bool,
+    opponent_delay: f32,
     window_width: f32,
     window_height: f32,
     stockfish: String,
@@ -233,6 +236,8 @@ pub struct Settings {
     pub log_height: Pixels,
     pub board_size: f32,
     pub animate_moves: bool,
+    /// The least time an opponent's move takes, so that a quick one doesn't land at once.
+    pub opponent_delay: Duration,
     pub window_size: (Pixels, Pixels),
     pub stockfish: String,
     pub lc0: String,
@@ -243,6 +248,8 @@ pub struct Settings {
     pub theme: String,
     pub piece_set: String,
     pub language: String,
+    /// The font the language asks for, while it hasn't been fetched.
+    pub missing_font: Option<LanguageFont>,
     pub sound_pack: String,
     /// Where the chosen pack's sounds are, if it's on.
     pub sound_pack_dir: Option<PathBuf>,
@@ -357,6 +364,26 @@ impl Settings {
         Some(Self::data_dir()?.join("adapters"))
     }
 
+    /// Where downloaded fonts go.
+    pub fn fonts_dir() -> Option<PathBuf> {
+        Some(Self::data_dir()?.join("fonts"))
+    }
+
+    /// The interface font: the one the language asks for once it's here, else the one set.
+    /// With it, the font still to fetch for the language, if any.
+    fn resolve_font(set: &str, wanted: Option<LanguageFont>) -> (String, Option<LanguageFont>) {
+        match wanted {
+            Some(font) if !Self::has_font(&font) => (set.to_owned(), Some(font)),
+            Some(font) => (font.family, None),
+            None => (set.to_owned(), None),
+        }
+    }
+
+    /// Whether `font` has been fetched.
+    pub fn has_font(font: &LanguageFont) -> bool {
+        Self::fonts_dir().is_some_and(|folder| folder.join(font.file_name()).is_file())
+    }
+
     /// Where downloaded engines go.
     pub fn engines_dir() -> Option<PathBuf> {
         Some(Self::data_dir()?.join("engines"))
@@ -397,6 +424,11 @@ impl Settings {
         if let Err(error) = i18n::use_language(&config.language, &plugins.languages) {
             errors.push(format!("language {}: {error}", config.language));
         }
+        let wanted_font = i18n::chosen(&config.language, &plugins.languages)
+            .ok()
+            .flatten()
+            .and_then(|language| language.font.clone());
+        let (font_family, missing_font) = Self::resolve_font(&config.ui_font_family, wanted_font);
 
         let mut theme_names: Vec<_> = BUILT_IN_THEMES
             .iter()
@@ -416,7 +448,7 @@ impl Settings {
         let settings = Self {
             colors,
             ui_font: Font {
-                family: config.ui_font_family.into(),
+                family: font_family.into(),
                 features: FontFeatures::default(),
                 fallbacks: None,
                 weight: FontWeight(config.ui_font_weight),
@@ -430,6 +462,9 @@ impl Settings {
             log_height: px(config.log_height),
             board_size: config.board_size.clamp(0.5, 1.),
             animate_moves: config.animate_moves,
+            // `nan` is valid TOML; it comes out as no delay.
+            opponent_delay: Duration::try_from_secs_f32(config.opponent_delay.clamp(0., 5.))
+                .unwrap_or_default(),
             window_size: (px(config.window_width), px(config.window_height)),
             stockfish: config.stockfish,
             lc0: config.lc0,
@@ -440,6 +475,7 @@ impl Settings {
             theme: config.theme,
             piece_set: config.piece_set,
             language: config.language,
+            missing_font,
             sound_pack: config.sound_pack,
             sound_pack_dir,
             sound_volume: config.sound_volume.clamp(0., 1.),

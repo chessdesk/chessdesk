@@ -12,8 +12,10 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
-    SessionUpdate, SystemPrompt, SystemPromptMode, TextContent,
+    RequestPermissionRequest, RequestPermissionResponse, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption,
+    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SystemPrompt, SystemPromptMode, TextContent,
 };
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use chessdesk_core::{Annotations, Game};
@@ -48,7 +50,7 @@ impl Effort {
 }
 
 /// The agents Chessdesk knows how to run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AgentKind {
     ClaudeCode,
     Codex,
@@ -116,11 +118,11 @@ impl AgentKind {
 
     /// Settings only this agent's adapter understands. For Claude, an empty list of each
     /// keeps a session at about 870 tokens, against 28,000 by default.
-    fn session_meta(self, model: Option<&str>, effort: Effort) -> Option<Map<String, Value>> {
+    fn session_meta(self, effort: Effort) -> Option<Map<String, Value>> {
         if self != Self::ClaudeCode {
             return None;
         }
-        let mut options = json!({
+        let options = json!({
             "tools": [],
             "settingSources": [],
             "plugins": [],
@@ -129,9 +131,6 @@ impl AgentKind {
             "effort": effort.level(),
             "extraArgs": { "strict-mcp-config": null },
         });
-        if let Some(model) = model {
-            options["model"] = json!(model);
-        }
         let mut meta = Map::new();
         meta.insert("claudeCode".to_owned(), json!({ "options": options }));
         Some(meta)
@@ -199,6 +198,126 @@ fn text_block(text: String) -> ContentBlock {
     ContentBlock::Text(TextContent::new(text))
 }
 
+/// The agent's process, as `config` asks for it.
+fn process(config: &AgentConfig) -> Result<AcpAgent, agent_client_protocol::Error> {
+    let Some(mut command) = adapters::command(config.kind, &config.adapters) else {
+        return Err(agent_client_protocol::Error::internal_error());
+    };
+    command.extend(
+        config
+            .kind
+            .arguments(config.model.as_deref(), config.effort),
+    );
+    let (program, args) = command.split_first().expect("commands are not empty");
+    let mut process = AcpAgentConfig::new(program).args(args.iter().cloned());
+    if let Some((name, value)) = config.kind.environment(config.effort) {
+        process = process.env(name, value);
+    }
+    Ok(AcpAgent::new(process))
+}
+
+/// A model an agent offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Model {
+    /// What the agent knows it by, to ask for it.
+    pub id: String,
+    /// What it shows as.
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// The models an agent offers, as it says when a session starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Models {
+    /// The session setting they're the choices of. `None` for an agent that takes its model
+    /// only on its command line, and lists none.
+    pub option: Option<String>,
+    /// The one a session starts with: the agent's own default.
+    pub current: String,
+    pub choices: Vec<Model>,
+}
+
+impl Models {
+    /// The model choice among a session's settings, if the agent offers one.
+    fn from_options(options: &[SessionConfigOption]) -> Option<Self> {
+        let option = options
+            .iter()
+            .find(|option| option.category == Some(SessionConfigOptionCategory::Model))?;
+        let SessionConfigKind::Select(select) = &option.kind else {
+            return None;
+        };
+        let model = |choice: &SessionConfigSelectOption| Model {
+            id: choice.value.to_string(),
+            name: choice.name.clone(),
+            description: choice.description.clone(),
+        };
+        let choices = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(choices) => choices.iter().map(model).collect(),
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|group| group.options.iter().map(model))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Some(Self {
+            option: Some(option.id.to_string()),
+            current: select.current_value.to_string(),
+            choices,
+        })
+    }
+
+    /// The model with `id`, if it's offered.
+    pub fn find(&self, id: &str) -> Option<&Model> {
+        self.choices.iter().find(|model| model.id == id)
+    }
+}
+
+/// Copilot's model, as its own settings name it: it lists none over the protocol. `auto`
+/// lets it pick, which is also what it does with none set.
+fn copilot_model() -> String {
+    let settings = std::env::var_os("COPILOT_HOME")
+        .map(PathBuf::from)
+        .or_else(|| Some(std::env::home_dir()?.join(".copilot")))
+        .map(|folder| folder.join("settings.json"));
+    settings
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|settings| settings.get("model")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "auto".to_owned())
+}
+
+/// Asks the agent which models it offers: starts it, opens a session and stops again. No
+/// prompt, so no tokens. `None` if it offers no choice.
+pub fn models(config: &AgentConfig) -> Result<Option<Models>, PlayerError> {
+    if config.kind == AgentKind::Copilot {
+        return Ok(Some(Models {
+            option: None,
+            current: copilot_model(),
+            choices: Vec::new(),
+        }));
+    }
+    let process = |error: agent_client_protocol::Error| PlayerError::Process(error.to_string());
+    let agent = self::process(config).map_err(process)?;
+    futures::executor::block_on(Client.v1().connect_with(
+        agent,
+        async move |connection: ConnectionTo<Agent>| {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let session = connection
+                .send_request(NewSessionRequest::new(empty_folder()?))
+                .block_task()
+                .await?;
+            Ok(session
+                .config_options
+                .as_deref()
+                .and_then(Models::from_options))
+        },
+    ))
+    .map_err(process)
+}
+
 /// Connects to the agent and serves prompts until the [`Session`] goes away.
 async fn run(
     config: AgentConfig,
@@ -206,17 +325,8 @@ async fn run(
     mut incoming: mpsc::UnboundedReceiver<Ask>,
 ) -> Result<(), agent_client_protocol::Error> {
     let model = config.model.as_deref();
-    let Some(mut command) = adapters::command(config.kind, &config.adapters) else {
-        return Err(agent_client_protocol::Error::internal_error());
-    };
-    command.extend(config.kind.arguments(model, config.effort));
-    let (program, args) = command.split_first().expect("commands are not empty");
-    let mut process = AcpAgentConfig::new(program).args(args.iter().cloned());
-    if let Some((name, value)) = config.kind.environment(config.effort) {
-        process = process.env(name, value);
-    }
-    let agent = AcpAgent::new(process);
-    let meta = config.kind.session_meta(model, config.effort);
+    let agent = process(&config)?;
+    let meta = config.kind.session_meta(config.effort);
     let reply_text = Arc::new(Mutex::new(String::new()));
     let collected = reply_text.clone();
 
@@ -266,11 +376,22 @@ async fn run(
             } else {
                 rules = Some(system);
             }
-            let session = connection
-                .send_request(session)
-                .block_task()
-                .await?
-                .session_id;
+            let opened = connection.send_request(session).block_task().await?;
+            let session = opened.session_id;
+            let offered = opened
+                .config_options
+                .as_deref()
+                .and_then(Models::from_options);
+            if let Some(change) = model.and_then(|model| model_change(offered.as_ref()?, model)) {
+                connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session.clone(),
+                        change.0,
+                        SessionConfigOptionValue::value_id(change.1),
+                    ))
+                    .block_task()
+                    .await?;
+            }
             let mut running = Tokens::default();
             while let Some(ask) = incoming.next().await {
                 let text = match rules.take() {
@@ -295,6 +416,13 @@ async fn run(
             Ok(())
         })
         .await
+}
+
+/// The setting and value that switch a session from the model it started with to `model`,
+/// if it needs switching and the agent takes it that way.
+fn model_change(offered: &Models, model: &str) -> Option<(String, String)> {
+    let option = offered.option.clone()?;
+    (offered.current != model).then(|| (option, model.to_owned()))
 }
 
 /// What a turn added to a running total.
@@ -423,16 +551,61 @@ pub fn review_game(
 mod tests {
     use super::*;
 
+    fn offered() -> Vec<SessionConfigOption> {
+        let mode = SessionConfigOption::select(
+            "mode",
+            "Mode",
+            "agent",
+            vec![SessionConfigSelectOption::new("agent", "Agent")],
+        )
+        .category(SessionConfigOptionCategory::Mode);
+        let model = SessionConfigOption::select(
+            "model",
+            "Model",
+            "opus",
+            vec![
+                SessionConfigSelectOption::new("opus", "Opus"),
+                SessionConfigSelectOption::new("haiku", "Haiku").description("Fastest"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Model);
+        vec![mode, model]
+    }
+
+    #[test]
+    fn models_are_read_from_the_model_setting() {
+        let models = Models::from_options(&offered()).unwrap();
+        assert_eq!(models.option.as_deref(), Some("model"));
+        assert_eq!(models.current, "opus");
+        assert_eq!(
+            models.find("haiku").unwrap().description.as_deref(),
+            Some("Fastest")
+        );
+        assert!(Models::from_options(&offered()[..1]).is_none());
+    }
+
+    #[test]
+    fn a_session_switches_only_to_another_model() {
+        let models = Models::from_options(&offered()).unwrap();
+        assert_eq!(
+            model_change(&models, "haiku"),
+            Some(("model".to_owned(), "haiku".to_owned()))
+        );
+        assert_eq!(model_change(&models, "opus"), None);
+        let command_line = Models {
+            option: None,
+            ..models
+        };
+        assert_eq!(model_change(&command_line, "haiku"), None);
+    }
+
     #[test]
     fn claude_gets_no_tools_settings_or_plugins() {
-        let meta = AgentKind::ClaudeCode
-            .session_meta(Some("haiku"), Effort::High)
-            .unwrap();
+        let meta = AgentKind::ClaudeCode.session_meta(Effort::High).unwrap();
         let options = &meta["claudeCode"]["options"];
         for key in ["tools", "settingSources", "plugins", "skills"] {
             assert_eq!(options[key], json!([]), "{key}");
         }
-        assert_eq!(options["model"], "haiku");
         assert_eq!(options["effort"], "high");
     }
 

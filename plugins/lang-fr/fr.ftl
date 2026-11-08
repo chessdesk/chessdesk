@@ -18,6 +18,7 @@ welcome-start = C'est parti
 quit = Quitter
 analyze-with-stockfish = Analyser avec Stockfish
 review-with = Commenter avec { $agent }
+agent-settings = Réglages des agents
 flip-board = Retourner l'échiquier
 game-history = Historique des parties
 game-panel = Panneau de partie
@@ -37,6 +38,14 @@ github-repository = Dépôt GitHub
 check-for-updates = Rechercher des mises à jour…
 about-description = Une application d'échecs de bureau pour jouer contre des agents IA et des moteurs.
 about-version = Version { $version }
+update-to = Passer à la { $version }
+restart-to-update = Redémarrer pour mettre à jour
+check-now = Vérifier
+checking-for-updates = Recherche de mises à jour
+up-to-date = Version { $version }, la plus récente
+update-available = La version { $version } est sortie, vous avez la { $current }
+update-ready = La version { $version } est en place : redémarrez pour l'utiliser
+release-notes = Notes de version
 
 ## Window and common buttons
 
@@ -44,7 +53,9 @@ minimize = Réduire
 restore = Restaurer
 maximize = Agrandir
 close = Fermer
-copy = Copier
+copy-trace = Copier la trace
+copied = Copié
+report-issue = Signaler le problème
 cancel = Annuler
 delete = Supprimer
 export = Exporter
@@ -52,6 +63,15 @@ choose = Choisir
 open = Ouvrir
 rename = Renommer
 install = Installer
+
+## Work under way, in the title bar
+
+activity-thinking = { $agent } réfléchit
+activity-reviewing = { $agent } commente la partie
+activity-analyzing = Analyse avec Stockfish, coup { $done } sur { $all }
+activity-downloading = Téléchargement de { $name }, { $percent } %
+activity-installing = Installation de l'adaptateur { $agent }
+activity-asking-models = { $agent } est interrogé sur ses modèles
 
 ## Game history
 
@@ -106,7 +126,7 @@ instructions-example = Ouvre avec le système de Londres. Sois indulgent avec mo
 ## New game
 
 opponent = Adversaire
-not-installed = { $name } (non installé)
+free-options = Options gratuites
 install-in-settings = Installer dans les réglages
 download-in-settings = Télécharger dans les réglages
 strength = Niveau
@@ -115,6 +135,10 @@ engine-elo = { $elo } Elo moteur
 maia-strength = Joue environ { $rating } sur Lichess
 model = Modèle
 model-hint = Les modèles moins chers utilisent moins de crédits
+model-default = Par défaut ({ $model })
+model-agent-default = Celui de l'agent par défaut
+models-asking = Recherche des modèles…
+models-unknown = Impossible de connaître ses modèles : { $error }
 reasoning-effort = Effort de réflexion
 effort-value = { $effort }. Plus il est élevé, plus il coûte de jetons
 effort-low = Faible
@@ -149,11 +173,12 @@ page-engines = Moteurs
 page-agents = Agents
 page-keys = Raccourcis
 page-plugins = Extensions
+page-updates = Mises à jour
 language = Langue
 language-system = Système ({ $language })
 theme = Thème
-theme-dark = Sombre
-theme-light = Clair
+theme-dark = Chessdesk Sombre
+theme-light = Chessdesk Clair
 pieces = Pièces
 font-size = Taille du texte
 corner-radius = Arrondi des angles
@@ -164,11 +189,15 @@ board-size = Taille de l'échiquier
 board-size-value = { $percent } % de la place disponible
 animate-moves = Animer les coups
 animate-moves-hint = Les coups adverses et le parcours d'une partie glissent en place
+opponent-delay = Délai de l'adversaire
+opponent-delay-value = Chaque coup de l'adversaire prend au moins { $seconds } s
 sound-pack = Pack de sons
 sound-off = Désactivé
 volume = Volume
 volume-value = { $percent } %
 downloading = Téléchargement, { $percent } %
+font-needed = Cette langue a besoin de la police { $font }
+font-download-size = Téléchargement de { $megabytes } Mo, suivi dans la barre de titre
 installed = Installé
 download = Télécharger
 update = Mettre à jour
@@ -191,6 +220,12 @@ agent-needs-node = Cet agent nécessite Node.js.
 agent-adapter-missing = L'adaptateur de { $agent } n'est pas installé.
 stockfish-missing = Stockfish n'est pas installé.
 maia-missing = Maia nécessite lc0 et ses réseaux.
+stockfish-needed = { $feature ->
+    [likelihood] Les chances de gain nécessitent Stockfish
+    [tutoring] Le mode entraînement nécessite Stockfish
+   *[both] Les chances de gain et le mode entraînement nécessitent Stockfish
+}
+stockfish-download-size = Environ 80 Mo, suivi dans la barre de titre
 
 ## Exporting
 
@@ -210,6 +245,8 @@ error-export-game = impossible d'exporter la partie : { $error }
 error-save-setting = impossible d'enregistrer le réglage : { $error }
 error-download = échec du téléchargement : { $error }
 error-install = échec de l'installation : { $error }
+error-update-check = Impossible de rechercher des mises à jour : { $error }
+error-restart = Impossible de redémarrer : { $error }
 error-review = Analyse : { $error }
 error-no-data-folder = aucun dossier de données sur ce système
 invalid-position = Cette position de départ n'est pas valide.

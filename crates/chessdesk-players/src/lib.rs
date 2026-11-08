@@ -8,6 +8,7 @@ pub mod download;
 pub mod prompt;
 pub mod reply;
 pub mod uci;
+pub mod update;
 
 use std::fmt;
 use std::ops::AddAssign;

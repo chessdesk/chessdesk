@@ -12,6 +12,7 @@ use gpui::{
 };
 
 use crate::settings::Settings;
+use crate::ui;
 
 actions!(
     text_area,
@@ -76,6 +77,10 @@ pub fn bind_keys(cx: &mut App) {
 /// The text changed.
 pub struct Changed;
 
+/// Up or Down in a one-line field, which has no lines to move between: by -1 or 1, for
+/// what the field belongs to, such as a list under it.
+pub struct Step(pub isize);
+
 /// How editing a one-line field ended.
 pub enum Finished {
     Accepted,
@@ -100,6 +105,8 @@ pub struct TextArea {
     placeholder: SharedString,
     /// Enter ends the editing instead of starting a line.
     one_line: bool,
+    /// As tall as the controls, rather than as its line.
+    control_height: bool,
     dragging: bool,
     paragraphs: Vec<Paragraph>,
     bounds: Bounds<Pixels>,
@@ -108,6 +115,7 @@ pub struct TextArea {
 
 impl EventEmitter<Changed> for TextArea {}
 impl EventEmitter<Finished> for TextArea {}
+impl EventEmitter<Step> for TextArea {}
 
 impl Focusable for TextArea {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -156,6 +164,7 @@ impl TextArea {
             reversed: false,
             placeholder: placeholder.into(),
             one_line: false,
+            control_height: false,
             dragging: false,
             paragraphs: Vec::new(),
             bounds: Bounds::default(),
@@ -171,6 +180,12 @@ impl TextArea {
             one_line: true,
             ..Self::new(text, SharedString::default(), cx)
         }
+    }
+
+    /// The field as tall as buttons and selects, to stand in for one.
+    pub fn control_height(mut self) -> Self {
+        self.control_height = true;
+        self
     }
 
     pub fn text(&self) -> &str {
@@ -304,11 +319,19 @@ impl TextArea {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical(-1.), cx);
+        if self.one_line {
+            cx.emit(Step(-1));
+        } else {
+            self.move_to(self.vertical(-1.), cx);
+        }
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical(1.), cx);
+        if self.one_line {
+            cx.emit(Step(1));
+        } else {
+            self.move_to(self.vertical(1.), cx);
+        }
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
@@ -682,7 +705,12 @@ impl Render for TextArea {
             .relative()
             .w_full()
             .map(|field| {
-                if self.one_line {
+                if self.control_height {
+                    // The line, centred inside the border by hand: as the box scrolls, it
+                    // won't centre its content itself.
+                    let inset = (ui::CONTROL_HEIGHT - px(2.) - line) / 2.;
+                    field.h(ui::CONTROL_HEIGHT).px_2().pt(inset.max(px(0.)))
+                } else if self.one_line {
                     field.h(line + px(2.)).px_1()
                 } else {
                     field

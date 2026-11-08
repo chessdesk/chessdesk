@@ -3,6 +3,10 @@ set windows-shell := ["cmd", "/c"]
 run *args:
     cargo run -- {{ args }}
 
+# Moves everything Chessdesk keeps on this machine to the trash, after asking.
+reset:
+    cargo run -- reset
+
 release:
     cargo build --release
 

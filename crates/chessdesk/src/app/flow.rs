@@ -314,7 +314,9 @@ impl Chessdesk {
         let mut opponent = live.opponent.take();
         let plan = live.plan.clone();
         let instructions = live.setup.instructions.clone();
+        let delay = Settings::get(cx).opponent_delay;
         cx.spawn(async move |this, cx| {
+            let asked = Instant::now();
             let (opponent, decision) = cx
                 .background_spawn(async move {
                     let started = match opponent.take() {
@@ -330,6 +332,10 @@ impl Chessdesk {
                     }
                 })
                 .await;
+            // A move that comes at once is easy to miss, and feels like no thought at all.
+            if let Some(rest) = delay.checked_sub(asked.elapsed()) {
+                cx.background_executor().timer(rest).await;
+            }
             this.update(cx, |this, cx| {
                 this.on_decision(id, epoch, opponent, decision, cx);
             })
@@ -549,6 +555,19 @@ impl Chessdesk {
 
     /// Has Stockfish look at the next position waiting, if this game wants that. One at a
     /// time and in order, however fast the moves come: a verdict needs both sides of a move.
+    /// Evaluates the games that waited for Stockfish, which may just have arrived.
+    pub(super) fn evaluate_waiting(&mut self, cx: &mut Context<Self>) {
+        let waiting: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|session| session.wants_evaluations())
+            .map(|session| session.id)
+            .collect();
+        for id in waiting {
+            self.evaluate_live(id, cx);
+        }
+    }
+
     fn evaluate_live(&mut self, id: SessionId, cx: &mut Context<Self>) {
         let settings = Settings::get(cx);
         if OpponentKind::Stockfish.missing(&settings).is_some() {
@@ -1091,7 +1110,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        if session.live.is_some() || session.agent_review {
+        if session.live.is_some() || session.reviewer.is_some() {
             return;
         }
         if session.game.moves().is_empty() {
@@ -1104,7 +1123,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        session.agent_review = true;
+        session.reviewer = Some(kind);
         let mut game = session.game.clone();
         cx.notify();
         let config = AgentConfig {
@@ -1135,7 +1154,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        session.agent_review = false;
+        session.reviewer = None;
         match reviewed {
             Ok((_, 0, _)) => self.report(tr("review-empty"), cx),
             Ok((mut game, _, tokens)) => {

@@ -1,31 +1,28 @@
 //! The settings page. Every control writes straight to `config.toml`, which stays the
 //! single source of truth: the file can still be edited by hand.
 
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::Duration;
-
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::adapters::{self, Readiness};
-use chessdesk_players::download::{self, can_download_lc0, can_download_stockfish};
+use chessdesk_players::download::{can_download_lc0, can_download_stockfish};
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, MouseButton, PathPromptOptions, Pixels,
-    SharedString, Window, div, prelude::*, px,
+    SharedString, Subscription, Window, div, prelude::*, px,
 };
 
 use crate::audio;
 use crate::i18n::{self, tr, tr_with};
+use crate::installs::{AppUpdate, Engine, Installs};
 use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
 use crate::setup::{OpponentKind, title_case};
-use crate::ui;
+use crate::ui::{self, Logo};
 
 const CONTENT_WIDTH: Pixels = px(560.);
-/// How often a download's progress is looked at.
-const PROGRESS_TICK: Duration = Duration::from_millis(200);
 /// `board_size` in the file, in twentieths: from half the room to all of it.
 const BOARD_SIZES: [f64; 11] = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.];
 const FONT_SIZES: [f64; 7] = [10., 11., 12., 13., 14., 15., 16.];
 const CORNER_RADII: [f64; 9] = [0., 1., 2., 3., 4., 5., 6., 7., 8.];
+/// `opponent_delay` in the file, in seconds.
+const OPPONENT_DELAYS: [f64; 8] = [0., 0.5, 1., 1.5, 2., 3., 4., 5.];
 const VOLUMES: [f64; 11] = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
 /// Every key, as the Game menu's shortcuts and the board's own: the id of what it does,
 /// and the key.
@@ -57,10 +54,11 @@ pub enum SettingsPage {
     Agents,
     Keys,
     Plugins,
+    Updates,
 }
 
 impl SettingsPage {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Appearance,
         Self::Board,
         Self::Sound,
@@ -68,6 +66,7 @@ impl SettingsPage {
         Self::Agents,
         Self::Keys,
         Self::Plugins,
+        Self::Updates,
     ];
 
     fn title(self) -> SharedString {
@@ -79,6 +78,7 @@ impl SettingsPage {
             Self::Agents => "page-agents",
             Self::Keys => "page-keys",
             Self::Plugins => "page-plugins",
+            Self::Updates => "page-updates",
         })
     }
 }
@@ -89,26 +89,12 @@ pub enum Event {
     Failed(String),
 }
 
-/// An engine that can be fetched.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Engine {
-    Stockfish,
-    Maia,
-}
-
-/// What a running download reports.
-enum Update {
-    Progress(f32),
-    Done(Result<Vec<(&'static str, PathBuf)>, String>),
-}
-
 pub struct SettingsView {
     page: SettingsPage,
     open_select: Option<&'static str>,
-    /// What's being fetched, and how far along it is, from 0 to 1.
-    downloading: Option<(Engine, f32)>,
-    /// The agent whose adapter is being installed.
-    installing: Option<AgentKind>,
+    /// Engines and adapters being fetched, which outlive this page.
+    installs: Entity<Installs>,
+    _redraw: Subscription,
 }
 
 impl EventEmitter<Event> for SettingsView {}
@@ -135,24 +121,6 @@ fn stop_of(stops: &[f64], value: f64) -> usize {
     (0..stops.len())
         .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
         .unwrap_or(0)
-}
-
-/// Fetches an engine and says which settings now point at it.
-fn install(
-    engine: Engine,
-    root: &std::path::Path,
-    progress: &mut dyn FnMut(f32),
-) -> Result<Vec<(&'static str, PathBuf)>, String> {
-    match engine {
-        Engine::Stockfish => {
-            let program = download::install_stockfish(root, progress)?;
-            Ok(vec![("stockfish", program)])
-        }
-        Engine::Maia => {
-            let (lc0, weights) = download::install_maia(root, progress)?;
-            Ok(vec![("lc0", lc0), ("maia_weights", weights)])
-        }
-    }
 }
 
 impl SettingsView {
@@ -216,6 +184,40 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// The language picked asks for a font that isn't here yet: what it is, and the way to
+    /// fetch it, which shows in the title bar while it runs.
+    fn font_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let settings = Settings::get(cx);
+        let font = settings.missing_font.clone()?;
+        let message = tr_with!("font-needed", font = font.family.as_str());
+        let size = font.bytes.map(|bytes| {
+            let megabytes = format!("{:.1}", bytes as f64 / 1_000_000.);
+            tr_with!("font-download-size", megabytes = megabytes)
+        });
+        let fetching = self
+            .installs
+            .read(cx)
+            .font()
+            .map(|(family, _)| family.clone());
+        let button = |busy| ui::notice_button("download-font", tr("download"), busy, &settings);
+        let action = match fetching {
+            Some(family) if family == font.family => button(true),
+            // Another language's font, picked before this one: one at a time.
+            Some(_) => button(true).opacity(0.5),
+            None => button(false).on_click(cx.listener(move |this, _, _, cx| {
+                let font = font.clone();
+                this.installs
+                    .update(cx, |installs, cx| installs.download_font(font, cx));
+            })),
+        };
+        Some(
+            ui::notice(message, size, &settings)
+                .mb_1()
+                .child(action)
+                .into_any_element(),
+        )
+    }
+
     /// A row with a stepped slider over numbers in the config file.
     fn number(
         key: &'static str,
@@ -270,15 +272,16 @@ impl SettingsView {
 
     fn appearance(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
-        vec![
-            self.select(
-                "language",
-                tr("language"),
-                &settings.language,
-                &settings.language_names,
-                window,
-                cx,
-            ),
+        let mut rows = vec![self.select(
+            "language",
+            tr("language"),
+            &settings.language,
+            &settings.language_names,
+            window,
+            cx,
+        )];
+        rows.extend(self.font_notice(cx));
+        rows.extend([
             self.select(
                 "theme",
                 tr("theme"),
@@ -311,7 +314,8 @@ impl SettingsView {
                 window,
                 cx,
             ),
-        ]
+        ]);
+        rows
     }
 
     fn board(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -345,6 +349,18 @@ impl SettingsView {
                 window,
                 cx,
             ),
+            Self::number(
+                "opponent_delay",
+                tr("opponent-delay"),
+                (&OPPONENT_DELAYS, settings.opponent_delay.as_secs_f64()),
+                tr_with!(
+                    "opponent-delay-value",
+                    seconds = settings.opponent_delay.as_secs_f64()
+                )
+                .to_string(),
+                window,
+                cx,
+            ),
         ]
     }
 
@@ -369,64 +385,6 @@ impl SettingsView {
                 cx,
             ),
         ]
-    }
-
-    /// Starts fetching an engine, reporting progress as it goes.
-    fn download(&mut self, engine: Engine, cx: &mut Context<Self>) {
-        let Some(root) = Settings::engines_dir() else {
-            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
-            return;
-        };
-        self.downloading = Some((engine, 0.));
-        cx.notify();
-        let (updates, incoming) = mpsc::channel();
-        cx.background_spawn(async move {
-            let progress = updates.clone();
-            let installed = install(engine, &root, &mut |done| {
-                let _ = progress.send(Update::Progress(done));
-            });
-            let _ = updates.send(Update::Done(installed));
-        })
-        .detach();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(PROGRESS_TICK).await;
-                for update in incoming.try_iter() {
-                    let finished = matches!(update, Update::Done(_));
-                    if this
-                        .update(cx, |this, cx| this.on_update(update, cx))
-                        .is_err()
-                        || finished
-                    {
-                        return;
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn on_update(&mut self, update: Update, cx: &mut Context<Self>) {
-        match update {
-            Update::Progress(done) => {
-                if let Some((_, progress)) = &mut self.downloading {
-                    *progress = done;
-                }
-            }
-            Update::Done(Ok(paths)) => {
-                self.downloading = None;
-                for (key, path) in paths {
-                    Self::write(key, path.to_string_lossy().as_ref(), cx);
-                }
-            }
-            Update::Done(Err(error)) => {
-                self.downloading = None;
-                cx.emit(Event::Failed(
-                    tr_with!("error-download", error = error).to_string(),
-                ));
-            }
-        }
-        cx.notify();
     }
 
     /// Asks for a program or folder, and stores it under `key`.
@@ -459,14 +417,15 @@ impl SettingsView {
     ) -> AnyElement {
         let settings = Settings::get(cx);
         let missing = kind.missing(&settings);
-        let hint: SharedString = match (&self.downloading, &missing) {
+        let downloading = self.installs.read(cx).downloading();
+        let hint: SharedString = match (&downloading, &missing) {
             (Some((fetching, done)), _) if *fetching == engine => {
                 tr_with!("downloading", percent = (done * 100.).round() as u32)
             }
             (_, Some(missing)) => missing.clone().into(),
             (_, None) => tr("installed"),
         };
-        let busy = self.downloading.is_some();
+        let busy = downloading.is_some();
         let (id, key) = match engine {
             Engine::Stockfish => ("download-stockfish", "stockfish"),
             Engine::Maia => ("download-maia", "lc0"),
@@ -476,14 +435,15 @@ impl SettingsView {
         } else {
             "update"
         });
-        let fetching = self
-            .downloading
-            .is_some_and(|(fetching, _)| fetching == engine);
+        let fetching = downloading.is_some_and(|(fetching, _)| fetching == engine);
         let download = if fetching {
             ui::busy_button(id, label.clone(), &settings).into_any_element()
         } else if can_download && !busy {
             ui::action_button(id, label.clone(), &settings)
-                .on_click(cx.listener(move |this, _, _, cx| this.download(engine, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.installs
+                        .update(cx, |installs, cx| installs.download(engine, cx));
+                }))
                 .into_any_element()
         } else {
             ui::disabled_button(id, label, &settings).into_any_element()
@@ -524,43 +484,17 @@ impl SettingsView {
         rows
     }
 
-    /// Installs an agent's adapter, off the UI thread.
-    fn install_adapter(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
-        let Some(folder) = Settings::adapters_dir() else {
-            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
-            return;
-        };
-        self.installing = Some(kind);
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let installed = cx
-                .background_spawn(async move { adapters::install(kind, &folder) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.installing = None;
-                match installed {
-                    Ok(()) => cx.emit(Event::Changed),
-                    Err(error) => cx.emit(Event::Failed(
-                        tr_with!("error-install", error = error).to_string(),
-                    )),
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
     /// Whether each agent can play, and the way there if it can't yet.
     fn agents(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
         let folder = Settings::adapters_dir().unwrap_or_default();
+        let busy = self.installs.read(cx).installing();
         AgentKind::ALL
             .into_iter()
             .enumerate()
             .map(|(index, kind)| {
                 let state = adapters::readiness(kind, &folder);
-                let installing = self.installing == Some(kind);
+                let installing = busy == Some(kind);
                 let hint: SharedString = match state {
                     _ if installing => tr("installing-adapter"),
                     Readiness::Ready => tr("installed"),
@@ -575,18 +509,20 @@ impl SettingsView {
                     if installing {
                         ui::busy_button(("install", index), tr("install"), &settings)
                             .into_any_element()
-                    } else if self.installing.is_some() {
+                    } else if busy.is_some() {
                         ui::disabled_button(("install", index), tr("install"), &settings)
                             .into_any_element()
                     } else {
                         ui::action_button(("install", index), tr("install"), &settings)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.install_adapter(kind, cx)),
-                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.installs.update(cx, |installs, cx| {
+                                    installs.install_adapter(kind, cx);
+                                });
+                            }))
                             .into_any_element()
                     }
                 });
-                ui::setting_row(kind.name(), Some(hint), &settings)
+                ui::logo_setting_row(Logo::of_agent(kind), kind.name(), Some(hint), &settings)
                     .children(button)
                     .into_any_element()
             })
@@ -663,6 +599,75 @@ impl SettingsView {
         rows
     }
 
+    /// The version running and the latest, and the one button that takes each step between
+    /// them, which the update button in the title bar presses too.
+    fn updates(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let update = self.installs.read(cx).app_update().clone();
+        let current = env!("CARGO_PKG_VERSION");
+        let version = |release: &chessdesk_players::update::Release| release.version.to_string();
+        let hint = match &update {
+            AppUpdate::Unknown => tr_with!("about-version", version = current),
+            AppUpdate::Checking => tr("checking-for-updates"),
+            AppUpdate::UpToDate => tr_with!("up-to-date", version = current),
+            AppUpdate::Available(release) => tr_with!(
+                "update-available",
+                version = version(release),
+                current = current
+            ),
+            AppUpdate::Downloading(_, done) => {
+                tr_with!("downloading", percent = (done * 100.).round() as u32)
+            }
+            AppUpdate::Ready(release, _) => tr_with!("update-ready", version = version(release)),
+        };
+        let press = cx.listener(|this, _, _, cx| {
+            this.installs.update(cx, Installs::update_app);
+        });
+        let button = match &update {
+            AppUpdate::Unknown | AppUpdate::UpToDate => {
+                ui::action_button("update-app", tr("check-now"), &settings)
+                    .on_click(press)
+                    .into_any_element()
+            }
+            AppUpdate::Checking => {
+                ui::busy_button("update-app", tr("check-now"), &settings).into_any_element()
+            }
+            AppUpdate::Available(release) => ui::primary_button(
+                "update-app",
+                tr_with!("update-to", version = version(release)),
+                &settings,
+            )
+            .on_click(press)
+            .into_any_element(),
+            AppUpdate::Downloading(release, _) => ui::busy_button(
+                "update-app",
+                tr_with!("update-to", version = version(release)),
+                &settings,
+            )
+            .into_any_element(),
+            AppUpdate::Ready(..) => {
+                ui::primary_button("update-app", tr("restart-to-update"), &settings)
+                    .on_click(press)
+                    .into_any_element()
+            }
+        };
+        let page = match &update {
+            AppUpdate::Available(release)
+            | AppUpdate::Downloading(release, _)
+            | AppUpdate::Ready(release, _) => Some(release.page.clone()),
+            _ => None,
+        };
+        let notes = page.map(|page| {
+            ui::action_button("release-notes", tr("release-notes"), &settings)
+                .on_click(move |_, _, cx| cx.open_url(&page))
+        });
+        vec![
+            ui::setting_row("Chessdesk", Some(hint), &settings)
+                .child(div().flex().gap_1().children(notes).child(button))
+                .into_any_element(),
+        ]
+    }
+
     /// The pages, for the sidebar's place.
     pub fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let settings = Settings::get(cx);
@@ -718,15 +723,16 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
-        vec![
-            self.select(
-                "language",
-                tr("language"),
-                &settings.language,
-                &settings.language_names,
-                window,
-                cx,
-            ),
+        let mut rows = vec![self.select(
+            "language",
+            tr("language"),
+            &settings.language,
+            &settings.language_names,
+            window,
+            cx,
+        )];
+        rows.extend(self.font_notice(cx));
+        rows.extend([
             self.select(
                 "theme",
                 tr("theme"),
@@ -759,7 +765,8 @@ impl SettingsView {
                 window,
                 cx,
             ),
-        ]
+        ]);
+        rows
     }
 
     /// The current page, for the board's place.
@@ -777,6 +784,7 @@ impl SettingsView {
             SettingsPage::Agents => self.agents(cx),
             SettingsPage::Keys => Self::keys(cx),
             SettingsPage::Plugins => Self::plugins(cx),
+            SettingsPage::Updates => self.updates(cx),
         };
         div()
             .id("settings-content")
@@ -800,12 +808,15 @@ impl SettingsView {
 }
 
 /// Opens the settings as a view, on `page`.
-pub fn page(page: SettingsPage, cx: &mut App) -> Entity<SettingsView> {
-    cx.new(|_| SettingsView {
-        page,
-        open_select: None,
-        downloading: None,
-        installing: None,
+pub fn page(page: SettingsPage, installs: Entity<Installs>, cx: &mut App) -> Entity<SettingsView> {
+    cx.new(|cx| {
+        let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
+        SettingsView {
+            page,
+            open_select: None,
+            installs,
+            _redraw: redraw,
+        }
     })
 }
 

@@ -40,6 +40,11 @@ universal app for macOS and a tarball for Linux. Each is a single program with n
 It's been used on Windows so far. The macOS and Linux builds are started on those systems before every
 release, but nobody has played on them yet, so reports are welcome.
 
+Chessdesk looks for a new release at each start. When there is one, an Update button shows in the title
+bar: it downloads the new version and puts it in place of the old one, wherever that is, and the new
+version runs once you restart. The folder holding Chessdesk has to be writable for that. Settings,
+Updates checks by hand.
+
 The builds aren't signed, so your system asks before the first start:
 
 - **Windows**: SmartScreen says it protected your PC. Click More info, then Run anyway.

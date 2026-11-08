@@ -12,6 +12,8 @@ just release   # optimized binary at target\release\chessdesk.exe
 just dist      # fully optimized (fat LTO), as released, at target\dist\chessdesk.exe
 just check     # fmt, lint, test, deny
 just hooks     # git hooks, once per clone; needs prek
+just reset     # start over: config, plugins, adapters, engines, fonts and games to the trash,
+               # once you type "reset" (also `cargo run -- reset`)
 ```
 
 The binary carries its font, themes and plugins, so it needs no installing.
@@ -33,6 +35,10 @@ nothing. Each run keeps a screenshot per system as an artifact. Look at them: a 
 up but renders wrong still passes.
 
 If all of that passes, it publishes the release with all archives. So to release, bump the version.
+The app finds it through GitHub's latest release and downloads the archive named for its system
+([update.rs](../crates/chessdesk-players/src/update.rs)), so keep the archive names as they are.
+Only optimized builds look at launch: `just release` to try the update button against the last
+release with an older version in `Cargo.toml`.
 To try the builds from a branch without publishing: Actions, Release, Run workflow.
 
 ## Configure
@@ -62,11 +68,12 @@ board_dark = "#2f3b3b"
 | `crates/chessdesk` | The GPUI app. |
 | `plugins` | The plugins bundled into the binary. |
 
-The solid piece icons are [Font Awesome Free](https://fontawesome.com) (CC BY 4.0). The Claude Code and Codex logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) and remain their owners' marks. The Stockfish logo in `assets` comes from [stockfish-web](https://github.com/official-stockfish/stockfish-web) (MIT). The Maia logo is the favicon of [maiachess.com](https://www.maiachess.com) and remains its owners' mark.
+The solid piece icons are [Font Awesome Free](https://fontawesome.com) (CC BY 4.0). The Claude Code, Codex, Copilot and OpenCode logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) and remain their owners' marks. The Pi logo comes from [pi.dev](https://pi.dev) and remains its owners' mark. The Stockfish logo in `assets` comes from [stockfish-web](https://github.com/official-stockfish/stockfish-web) (MIT). The Maia logo is the favicon of [maiachess.com](https://www.maiachess.com) and remains its owners' mark.
 
 Try the app without an engine, or check a real agent, which spends real tokens:
 
 ```powershell
 cargo build -p chessdesk-players --example fake_uci   # then point `stockfish` at it
 cargo run -p chessdesk-players --example agent_smoke -- claude haiku
+cargo run -p chessdesk-players --example agent_models   # the models each agent offers, no tokens
 ```

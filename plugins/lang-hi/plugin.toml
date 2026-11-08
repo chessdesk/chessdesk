@@ -1,0 +1,15 @@
+name = "lang-hi"
+version = "1.0.0"
+description = "Chessdesk हिन्दी में"
+license = "GPL-3.0-or-later"
+
+[[languages]]
+name = "हिन्दी"
+locale = "hi"
+file = "hi.ftl"
+
+# Too large to bundle: Chessdesk offers to fetch it when the language is picked.
+[languages.font]
+family = "Noto Sans Devanagari"
+url = "https://raw.githubusercontent.com/google/fonts/86aced91de05cd4f96a06838124cca45be337b2b/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf"
+bytes = 641944

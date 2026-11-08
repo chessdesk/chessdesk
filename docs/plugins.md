@@ -32,6 +32,11 @@ dir = "sounds"                   # holds move.ogg and any of the others below, O
 name = "Frysk"                   # in the language itself, for `language = "..."`
 locale = "fy"                    # BCP 47: picks its plural rules, and matches the system's
 file = "fy.ftl"                  # Project Fluent
+
+[languages.font]                 # optional: a font for the language's script
+family = "Noto Sans SC"          # as the font file names it
+url = "https://…/NotoSansSC-Regular.otf"  # https, .ttf or .otf; best a fixed version
+bytes = 8331336                  # optional: the size, shown before downloading
 ```
 
 A board looks the same under any colour theme. `board = "Theme"` follows the theme instead.
@@ -56,12 +61,15 @@ move-count =
 Save the file and Chessdesk reloads it. `language = "System"`, the default, selects the system's
 language where a plugin has it and English otherwise; the setting shows which it came to. Agents write their comments in the chosen language too; moves
 stay in standard English notation, as do messages from engines and the plugin errors in the ribbon.
-Scripts the interface font lacks come from the system's fonts.
+Scripts the interface font lacks come from the system's fonts, or from the font a language names.
+Picking the language offers to download that font, and once it's there it replaces the interface
+font, so it must cover Latin as well; the Noto fonts from Google Fonts do. Downloaded fonts are kept
+in the `fonts` folder next to the engines.
 
 A theme file needs `background`, `accent`, `popover`, `popover_border`, `text`, `muted`, `caret`,
 `callout` and 16 `ansi` colours, of which red, green, yellow and blue draw markings. `board_light`
-and `board_dark` are optional. Other keys are ignored, so colour themes from
-[calm](../crates/chessdesk/assets/themes/dark.toml)'s format work as they are.
+and `board_dark` are optional; other keys are ignored. The
+[built-in dark theme](../crates/chessdesk/assets/themes/dark.toml) is a complete example.
 
 | Plugin | Brings | Licence |
 |---|---|---|
@@ -73,4 +81,4 @@ and `board_dark` are optional. Other keys are ignored, so colour themes from
 | [`marble-board`](../plugins/marble-board) | Lichess's blue-marble board | AGPL 3.0 or later |
 | [`wood-sounds`](../plugins/wood-sounds) | Real wood knocks from [Kenney](https://kenney.nl/assets/impact-sounds) (CC0), and a marimba made for Chessdesk | GPL 3.0 or later |
 | [`soft-sounds`](../plugins/soft-sounds) | Soft taps and a marimba, made for Chessdesk | GPL 3.0 or later |
-| [`lang-de`](../plugins/lang-de), [`lang-es`](../plugins/lang-es), [`lang-fr`](../plugins/lang-fr) | German, Spanish and French | GPL 3.0 or later |
+| [`lang-de`](../plugins/lang-de), [`lang-es`](../plugins/lang-es), [`lang-fr`](../plugins/lang-fr), [`lang-hi`](../plugins/lang-hi), [`lang-zh`](../plugins/lang-zh) | German, Spanish, French, Hindi and Simplified Chinese; Hindi and Chinese download a Noto font (OFL) when picked | GPL 3.0 or later |

@@ -5,18 +5,25 @@ mod app;
 mod audio;
 mod board;
 mod bundled;
+mod combobox;
 mod export;
+mod fonts;
 mod i18n;
+mod installs;
 mod library;
+mod models;
 mod new_game;
 mod onboarding;
+mod reset;
 mod settings;
 mod settings_view;
 mod setup;
 mod text_area;
+mod trace;
 mod ui;
 
 use std::borrow::Cow;
+use std::process::ExitCode;
 
 use gpui::{
     App, Application, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowOptions, point,
@@ -29,7 +36,10 @@ use settings::Settings;
 /// The interface font. Bundled, so that it works without being installed.
 const FONT: &[u8] = include_bytes!("../assets/fonts/Geist.ttf");
 
-fn main() {
+fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("reset") {
+        return reset::run();
+    }
     Application::new()
         .with_assets(ui::Assets)
         .run(move |cx: &mut App| {
@@ -37,7 +47,10 @@ fn main() {
                 eprintln!("could not load the bundled font: {error}");
             }
             let unpacked = Settings::plugins_dir().map(|root| bundled::install(&root));
+            // Before the settings, which may name one of them as the interface font.
+            let font_errors = fonts::load_fetched(cx);
             let (settings, mut errors) = Settings::load();
+            errors.extend(font_errors);
             if let Some(Err(error)) = unpacked {
                 errors.push(format!("could not unpack the bundled plugins: {error}"));
             }
@@ -77,4 +90,5 @@ fn main() {
             }
             cx.activate(true);
         });
+    ExitCode::SUCCESS
 }

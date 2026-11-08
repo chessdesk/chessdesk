@@ -11,10 +11,10 @@ use std::rc::Rc;
 
 use gpui::{
     Animation, AnimationElement, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context,
-    Corner, CursorStyle, DispatchPhase, Div, ElementId, Hsla, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful, Transformation, Window, anchored,
-    canvas, deferred, div, ease_out_quint, fill, percentage, point, prelude::*, px, size,
-    transparent_black,
+    Corner, CursorStyle, DispatchPhase, Div, ElementId, Hitbox, HitboxBehavior, Hsla, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Stateful,
+    Transformation, Window, anchored, canvas, deferred, div, ease_out_quint, fill, percentage,
+    point, prelude::*, px, relative, size, white,
 };
 
 use crate::settings::Settings;
@@ -46,6 +46,20 @@ pub const BAR_HEIGHT: Pixels = ROW_HEIGHT;
 pub const BAR_INSET: Pixels = px(17.);
 /// How much larger logos are than the text beside them.
 pub const LOGO_SCALE: f32 = 1.25;
+/// How much larger a settings row's logo is than its text: about as tall as label and hint.
+const SETTING_LOGO_SCALE: f32 = 2.;
+/// How round wide, flat shapes are against the corner radius: on them it looks stronger
+/// than it does on a button.
+pub const FLAT_RADIUS_SCALE: f32 = 0.7;
+/// How strongly a card's colour tints its background: results and verdicts.
+pub const CARD_TINT: f32 = 0.16;
+/// How strongly a card's details show, next to its main line.
+pub const CARD_DETAIL: f32 = 0.75;
+/// How much of the text colour lifts a notice's button off its card, and again on hover.
+const NOTICE_BUTTON_RAISE: f32 = 0.08;
+/// A setting's description, against its font size: closer than GPUI's default, so that
+/// it reads as one block with its label.
+const HINT_LINE_HEIGHT: f32 = 1.3;
 /// How much larger titles are than the text around them.
 const TITLE_SCALE: f32 = 1.3;
 /// One turn of a [`spinner`].
@@ -115,22 +129,6 @@ pub fn disabled_button(
         .text_color(settings.colors.muted)
         .border_1()
         .border_color(settings.colors.popover_border)
-        .child(label.into())
-}
-
-/// Words that do something: a way out of a dead end, such as a missing engine.
-pub fn text_link(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    settings: &Settings,
-) -> Stateful<Div> {
-    let text = settings.colors.text;
-    div()
-        .id(id)
-        .flex_none()
-        .cursor_pointer()
-        .text_color(settings.colors.caret)
-        .hover(move |style| style.text_color(text))
         .child(label.into())
 }
 
@@ -355,7 +353,34 @@ pub fn setting_row(
     hint: Option<SharedString>,
     settings: &Settings,
 ) -> Div {
-    let text = div()
+    labelled_row(setting_label(label, hint, settings))
+}
+
+/// A [`setting_row`] with a logo before its label and hint, centred beside both.
+pub fn logo_setting_row(
+    mark: Logo,
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let size = settings.ui_font_size * SETTING_LOGO_SCALE;
+    labelled_row(
+        div()
+            .flex()
+            .items_center()
+            .gap_2p5()
+            .min_w_0()
+            .child(logo(mark, size, settings.colors.text))
+            .child(setting_label(label, hint, settings)),
+    )
+}
+
+fn setting_label(
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    div()
         .flex()
         .flex_col()
         .min_w_0()
@@ -363,9 +388,13 @@ pub fn setting_row(
         .children(hint.map(|hint| {
             div()
                 .text_size(settings.ui_font_size * 0.92)
+                .line_height(relative(HINT_LINE_HEIGHT))
                 .text_color(settings.colors.muted)
                 .child(hint)
-        }));
+        }))
+}
+
+fn labelled_row(label: Div) -> Div {
     div()
         .flex()
         .items_center()
@@ -373,7 +402,84 @@ pub fn setting_row(
         .gap_4()
         .min_h(ROW_HEIGHT)
         .py_1()
+        .child(label)
+}
+
+/// Something to see to before going on, such as an engine to fetch: a card in the theme's
+/// own colours, its message and a quieter detail beside room for an action, added as a child.
+pub fn notice(
+    message: impl Into<SharedString>,
+    detail: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let text = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .child(div().text_color(settings.colors.text).child(message.into()))
+        .children(detail.map(|detail| {
+            div()
+                .text_size(settings.ui_font_size * 0.92)
+                .text_color(settings.colors.muted)
+                .child(detail)
+        }));
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_2p5()
+        .py_2()
+        .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
+        .bg(settings.colors.accent)
         .child(text)
+}
+
+/// The button of a [`notice`]: raised a little from the card, with no frame, its label in
+/// the text colour. While `busy` a spinner takes the label's place and the button keeps its
+/// width; add `on_click` only when it isn't.
+pub fn notice_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    busy: bool,
+    settings: &Settings,
+) -> Stateful<Div> {
+    let id = id.into();
+    let text = settings.colors.text;
+    let raised = settings
+        .colors
+        .accent
+        .blend(text.opacity(NOTICE_BUTTON_RAISE));
+    let hovered = raised.blend(text.opacity(NOTICE_BUTTON_RAISE));
+    let radius = settings.corner_radius;
+    let label = div().when(busy, Styled::invisible).child(label.into());
+    div()
+        .id(id.clone())
+        .relative()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(CONTROL_HEIGHT)
+        .px_2()
+        .rounded(radius)
+        .text_color(text)
+        .bg(raised)
+        .when(!busy, |button| {
+            button.cursor_pointer().child(hover_fill(hovered, radius))
+        })
+        .child(label)
+        .when(busy, |button| {
+            button.child(
+                div()
+                    .absolute()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(spinner(id, settings.ui_font_size, settings.colors.muted)),
+            )
+        })
 }
 
 /// A switch. Add `on_click`.
@@ -460,7 +566,7 @@ pub fn select_button(
                 .min_w_0()
                 .items_center()
                 .gap_1p5()
-                .children(mark.map(|mark| logo(mark, size * LOGO_SCALE)))
+                .children(mark.map(|mark| logo(mark, size * LOGO_SCALE, settings.colors.text)))
                 .child(div().truncate().child(label.into())),
         )
         .child(icon(Icon::ChevronDown, size, settings.colors.muted))
@@ -519,6 +625,81 @@ pub fn spinner(id: impl Into<ElementId>, size: Pixels, color: Hsla) -> impl Into
         Animation::new(SPIN).repeat(),
         |icon, turned| icon.with_transformation(Transformation::rotate(percentage(turned))),
     )
+}
+
+/// From one stripe of a [`loading_bar`] to the next, half of it stripe and half gap.
+const STRIPE_PERIOD: Pixels = px(24.);
+/// How long the stripes take to move on by one period, where the pattern repeats.
+const STRIPE_SLIDE: Duration = Duration::from_millis(900);
+/// How strong the gaps between stripes are, next to the stripes' full accent.
+const STRIPE_GAP_OPACITY: f32 = 0.45;
+
+/// Slanted stripes sliding along behind `status`, for work that takes a while. It fills
+/// what holds it. `id` keeps the stripes' place across frames, as for a [`spinner`].
+pub fn loading_bar(
+    id: impl Into<ElementId>,
+    status: impl Into<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let accent = settings.colors.accent;
+    let stripes = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .with_animation(
+            id,
+            Animation::new(STRIPE_SLIDE).repeat(),
+            move |stripes, moved| {
+                stripes.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, (), window, _| paint_stripes(bounds, moved, accent, window),
+                    )
+                    .size_full(),
+                )
+            },
+        );
+    // Cut off without an ellipsis. Never `line_clamp` with `text_ellipsis` to get one: text
+    // measured twice keeps the first cut's length, and gpui panics if that splits a char.
+    let label = div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .text_center()
+        .child(status.into());
+    div()
+        .relative()
+        .flex()
+        .items_center()
+        .size_full()
+        .px_2()
+        .overflow_hidden()
+        .text_color(settings.colors.text)
+        .bg(accent.opacity(STRIPE_GAP_OPACITY))
+        .child(stripes)
+        .child(label)
+}
+
+/// Leans at 45 degrees, starting far enough left that no corner of `bounds` is ever bare.
+/// `moved` is how far along the period the stripes are, from 0 to 1.
+fn paint_stripes(bounds: Bounds<Pixels>, moved: f32, color: Hsla, window: &mut Window) {
+    let (top, bottom) = (bounds.top(), bounds.bottom());
+    let slant = bounds.size.height;
+    let width = STRIPE_PERIOD / 2.;
+    let mut path = PathBuilder::fill();
+    let mut left = bounds.left() - slant - STRIPE_PERIOD * (1. - moved);
+    while left < bounds.right() {
+        path.move_to(point(left, bottom));
+        path.line_to(point(left + slant, top));
+        path.line_to(point(left + slant + width, top));
+        path.line_to(point(left + width, bottom));
+        path.close();
+        left += STRIPE_PERIOD;
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, color);
+    }
 }
 
 /// A line between two panes. It takes up one pixel, so that lines meet exactly, and is
@@ -653,7 +834,7 @@ pub fn slider(
     let on_pick = Rc::new(on_pick);
     let colors = settings.colors.clone();
     let radius = settings.corner_radius;
-    let paint = move |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
+    let paint = move |bounds: Bounds<Pixels>, hitbox: Hitbox, window: &mut Window, _: &mut App| {
         // The knob's left edge travels what the track has beyond the knob's own width.
         let travel = bounds.size.width - SLIDER_KNOB;
         let target = index as f32;
@@ -667,8 +848,10 @@ pub fn slider(
         state.shown.set(Some(shown));
         let left = bounds.left() + travel * (shown / (count.max(2) - 1) as f32);
 
+        // Clear in the border's own colour: a clear black would shade the border's inner
+        // edge, which shows as a dark line on light themes.
         window.paint_quad(
-            fill(bounds, transparent_black())
+            fill(bounds, colors.popover_border.opacity(0.))
                 .corner_radii(radius)
                 .border_widths(px(1.))
                 .border_color(colors.popover_border),
@@ -677,7 +860,21 @@ pub fn slider(
             point(left, bounds.top()),
             size(SLIDER_KNOB, bounds.size.height),
         );
-        window.paint_quad(fill(knob, colors.muted).corner_radii(radius));
+        // A grey knob is the darkest thing on a light page, so there it's white and framed
+        // like the track, its grooves grey.
+        let light = colors.background.l > 0.5;
+        let groove_color = if light {
+            window.paint_quad(
+                fill(knob, white())
+                    .corner_radii(radius)
+                    .border_widths(px(1.))
+                    .border_color(colors.popover_border),
+            );
+            colors.muted
+        } else {
+            window.paint_quad(fill(knob, colors.muted).corner_radii(radius));
+            colors.background.opacity(0.55)
+        };
         let middle = left + SLIDER_KNOB / 2.;
         for offset in [-SLIDER_GROOVE_GAP, px(0.), SLIDER_GROOVE_GAP] {
             let groove = Bounds::new(
@@ -687,7 +884,7 @@ pub fn slider(
                 ),
                 size(px(1.), bounds.size.height * 0.44),
             );
-            window.paint_quad(fill(groove, colors.background.opacity(0.55)));
+            window.paint_quad(fill(groove, groove_color));
         }
 
         let pick = {
@@ -703,7 +900,8 @@ pub fn slider(
         let down = state.clone();
         let press = pick.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
+            // The hitbox, not the bounds: a list open over the slider takes its clicks.
+            if phase == DispatchPhase::Bubble && hitbox.is_hovered(window) {
                 down.pressed.set(true);
                 press(event.position.x, window, cx);
             }
@@ -727,7 +925,13 @@ pub fn slider(
         .w(SELECT_WIDTH)
         .h(SLIDER_HEIGHT)
         .cursor_pointer()
-        .child(canvas(|_, _, _| {}, paint).size_full())
+        .child(
+            canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                paint,
+            )
+            .size_full(),
+        )
 }
 
 /// A full-width line across a window-level bar.

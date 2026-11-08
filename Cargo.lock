@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "chessdesk-core",
  "chessdesk-players",
@@ -973,6 +973,8 @@ dependencies = [
  "gpui",
  "jiff",
  "notify",
+ "nucleo-matcher",
+ "proptest",
  "rodio",
  "serde",
  "shakmaty",
@@ -981,13 +983,14 @@ dependencies = [
  "toml_edit 0.25.19+spec-1.1.0",
  "trash",
  "unic-langid",
+ "url",
  "which 8.0.6",
  "winresource",
 ]
 
 [[package]]
 name = "chessdesk-core"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "pgn-reader",
  "proptest",
@@ -998,12 +1001,14 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-players"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
  "agent-client-protocol",
  "chessdesk-core",
  "flate2",
  "futures",
+ "self-replace",
+ "semver",
  "serde",
  "serde_json",
  "shakmaty",
@@ -4047,6 +4052,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "num"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5612,6 +5627,17 @@ checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "self-replace"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "609c5606d9d357b26e4ee1a7a01beac396628d0fa01ebbade2a09cefb88e65af"
+dependencies = [
+ "fastrand 2.5.0",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

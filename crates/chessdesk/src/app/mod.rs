@@ -27,12 +27,15 @@ use shakmaty::{Color, Role};
 use crate::board::{self, Handlers, View};
 use crate::export::{self, ExportDialog};
 use crate::i18n::{tr, tr_with};
+use crate::installs::{self, Installs};
 use crate::library::{self, Entry};
+use crate::models::Catalog;
 use crate::new_game::{self, NewGame};
 use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
 use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
+use crate::trace::Trace;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
 use panel::{Folds, LogSpace};
@@ -67,7 +70,7 @@ const WATCH_SETTLE: Duration = Duration::from_millis(250);
 /// The room kept around the board.
 const BOARD_MARGIN: Pixels = px(24.);
 /// The rows above and below the board, and how far they keep from it.
-const NO_GAME_LOGOTYPE_HEIGHT: Pixels = px(35.);
+const NO_GAME_LOGOTYPE_HEIGHT: Pixels = px(25.);
 const MATERIAL_ROW: Pixels = px(22.);
 const MATERIAL_GAP: Pixels = px(4.);
 const MATERIAL_ICON_SCALE: f32 = 1.5;
@@ -156,6 +159,14 @@ pub struct Chessdesk {
     /// While open, the settings' pages take the history's place and their content the board's.
     settings_page: Option<(Entity<SettingsView>, [Subscription; 2])>,
     errors: Vec<SharedString>,
+    /// Every error of this run, for the trace copied or filed from the error bar.
+    trace: Trace,
+    /// When the trace was last copied, to say so on the button for a moment.
+    trace_copied: Option<Instant>,
+    /// Engines and adapters being fetched, and what listens to them: redraws and events.
+    installs: (Entity<Installs>, [Subscription; 2]),
+    /// The models each agent offers, and the redraws while it's asked.
+    catalog: (Entity<Catalog>, Subscription),
 }
 
 impl Chessdesk {
@@ -164,6 +175,22 @@ impl Chessdesk {
         focus.focus(window);
         watch_settings(cx);
         let settings = Settings::get(cx);
+        let catalog = cx.new(|_| Catalog::default());
+        let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
+        let installs = cx.new(|_| Installs::default());
+        let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
+        let events = cx.subscribe(&installs, |this, _, event, cx| match event {
+            installs::Event::Changed => {
+                this.reload_settings(cx);
+                this.evaluate_waiting(cx);
+            }
+            installs::Event::Failed(error) => this.report(error.clone(), cx),
+        });
+        // Not from a build being worked on, which is never behind and would only use up
+        // GitHub's allowance for the engine downloads.
+        if !cfg!(debug_assertions) {
+            installs.update(cx, |installs, cx| installs.check_for_update(true, cx));
+        }
         let mut this = Self {
             focus,
             sessions: vec![Session::new(0, Game::default())],
@@ -195,8 +222,16 @@ impl Chessdesk {
             dialog: None,
             export: None,
             settings_page: None,
-            errors: errors.into_iter().map(SharedString::from).collect(),
+            errors: Vec::new(),
+            trace: Trace::new(),
+            trace_copied: None,
+            installs: (installs, [redraw, events]),
+            catalog: (catalog, catalog_changes),
         };
+        for error in errors {
+            this.trace.record(&error);
+            this.errors.push(error.into());
+        }
         if Settings::is_first_run() {
             this.show_onboarding(cx);
         } else if this.history.is_empty() {
@@ -207,7 +242,7 @@ impl Chessdesk {
 
     /// The welcome on first start, then on to a game.
     fn show_onboarding(&mut self, cx: &mut Context<Self>) {
-        let choices = settings_view::page(SettingsPage::Appearance, cx);
+        let choices = settings_view::page(SettingsPage::Appearance, self.installs.0.clone(), cx);
         let changes = cx.subscribe(&choices, |this, _, event, cx| match event {
             settings_view::Event::Changed => this.reload_settings(cx),
             settings_view::Event::Failed(error) => this.report(error.clone(), cx),
@@ -264,12 +299,29 @@ impl Chessdesk {
     }
 
     fn report(&mut self, error: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.errors.push(error.into());
+        let error = error.into();
+        self.trace.record(&error);
+        self.errors.push(error);
         cx.notify();
     }
 
+    /// What the game on show is, for a trace: who's playing, not their names.
+    fn traced_game(&self) -> String {
+        let session = self.session();
+        let moves = session.game.moves().len();
+        match &session.live {
+            Some(live) => format!("against {}, {moves} moves", live.setup.opponent.name()),
+            None => format!("none being played, {moves} moves on show"),
+        }
+    }
+
     fn show_new_game(&mut self, cx: &mut Context<Self>) {
-        let dialog = new_game::dialog(Setup::load(), cx);
+        let dialog = new_game::dialog(
+            Setup::load(),
+            self.catalog.0.clone(),
+            self.installs.0.clone(),
+            cx,
+        );
         let subscription = cx.subscribe(&dialog, |this, _, event, cx| {
             this.dialog = None;
             match event {
@@ -284,7 +336,7 @@ impl Chessdesk {
     }
 
     fn show_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        let view = settings_view::page(page, cx);
+        let view = settings_view::page(page, self.installs.0.clone(), cx);
         // Its parts render here, so its changes have to redraw this view.
         let redraw = cx.observe(&view, |_, _, cx| cx.notify());
         let events = cx.subscribe(&view, |this, _, event, cx| match event {
@@ -297,6 +349,15 @@ impl Chessdesk {
         });
         self.settings_page = Some((view, [redraw, events]));
         cx.notify();
+    }
+
+    /// The Updates page, with its button pressed: the update fetched once one is known, the
+    /// new version started once it's in place, and GitHub asked otherwise.
+    fn update_app(&mut self, cx: &mut Context<Self>) {
+        // New Game would cover the page, as it does at a start with no games yet.
+        self.dialog = None;
+        self.show_settings(SettingsPage::Updates, cx);
+        self.installs.0.update(cx, Installs::update_app);
     }
 
     fn show_export(&mut self, game: Game, path: &Path, cx: &mut Context<Self>) {
@@ -318,6 +379,13 @@ impl Chessdesk {
     fn reload_settings(&mut self, cx: &mut Context<Self>) {
         let (settings, errors) = Settings::load();
         Settings::set(settings, cx);
+        // Settings are read again on each change, with the same errors as before.
+        for error in errors
+            .iter()
+            .filter(|error| !self.errors.iter().any(|shown| shown == *error))
+        {
+            self.trace.record(error);
+        }
         self.errors = errors.into_iter().map(SharedString::from).collect();
         cx.refresh_windows();
     }
@@ -439,8 +507,9 @@ impl Chessdesk {
         ui::divider(id, axis, window, &settings, on_press)
     }
 
-    /// With no game to show there's no board: just the way to start one.
-    fn render_no_game(cx: &mut Context<Self>) -> AnyElement {
+    /// With no game to show there's no board: just the way to start one, and to a newer
+    /// Chessdesk when there is one.
+    fn render_no_game(&self, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
         div()
             .flex()
@@ -453,15 +522,21 @@ impl Chessdesk {
             .gap_6()
             .child(ui::logotype(NO_GAME_LOGOTYPE_HEIGHT, settings.colors.text))
             .child(
-                ui::action_button("start-new", tr("new-game"), &settings)
-                    .on_click(cx.listener(|this, _, _, cx| this.show_new_game(cx))),
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        ui::action_button("start-new", tr("new-game"), &settings)
+                            .on_click(cx.listener(|this, _, _, cx| this.show_new_game(cx))),
+                    )
+                    .children(self.update_button("update-app-empty", cx)),
             )
             .into_any_element()
     }
 
     fn render_board(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if self.session().is_blank() {
-            return Self::render_no_game(cx);
+            return self.render_no_game(cx);
         }
         let size = self.board_size(window, cx);
         let view = self.board_view(size);

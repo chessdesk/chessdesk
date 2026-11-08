@@ -20,6 +20,7 @@ welcome-start = Let's play
 quit = Quit
 analyze-with-stockfish = Analyze with Stockfish
 review-with = Review with { $agent }
+agent-settings = Agent settings
 flip-board = Flip board
 game-history = Game history
 game-panel = Game panel
@@ -39,6 +40,14 @@ github-repository = GitHub Repository
 check-for-updates = Check for updates…
 about-description = A desktop chess app for playing AI agents and engines.
 about-version = Version { $version }
+update-to = Update to { $version }
+restart-to-update = Restart to update
+check-now = Check now
+checking-for-updates = Checking for updates
+up-to-date = Version { $version }, the latest
+update-available = Version { $version } is out, you have { $current }
+update-ready = Version { $version } is in place: restart to use it
+release-notes = Release notes
 
 ## Window and common buttons
 
@@ -46,7 +55,9 @@ minimize = Minimize
 restore = Restore
 maximize = Maximize
 close = Close
-copy = Copy
+copy-trace = Copy trace
+copied = Copied
+report-issue = Report issue
 cancel = Cancel
 delete = Delete
 export = Export
@@ -54,6 +65,15 @@ choose = Choose
 open = Open
 rename = Rename
 install = Install
+
+## Work under way, in the title bar
+
+activity-thinking = { $agent } is thinking
+activity-reviewing = { $agent } is reviewing the game
+activity-analyzing = Analyzing with Stockfish, move { $done } of { $all }
+activity-downloading = Downloading { $name }, { $percent }%
+activity-installing = Installing the { $agent } adapter
+activity-asking-models = Asking { $agent } for its models
 
 ## Game history
 
@@ -108,7 +128,7 @@ instructions-example = Open with the London System. Go easy on me.
 ## New game
 
 opponent = Opponent
-not-installed = { $name } (not installed)
+free-options = Free options
 install-in-settings = Install in Settings
 download-in-settings = Download in Settings
 strength = Strength
@@ -117,6 +137,10 @@ engine-elo = { $elo } engine Elo
 maia-strength = Plays around { $rating } on Lichess
 model = Model
 model-hint = Cheaper models use fewer credits
+model-default = Default ({ $model })
+model-agent-default = The agent's default
+models-asking = Asking for models…
+models-unknown = Could not ask for its models: { $error }
 reasoning-effort = Reasoning effort
 effort-value = { $effort }. Higher costs more tokens
 effort-low = Low
@@ -151,11 +175,12 @@ page-engines = Engines
 page-agents = Agents
 page-keys = Keys
 page-plugins = Plugins
+page-updates = Updates
 language = Language
 language-system = System ({ $language })
 theme = Theme
-theme-dark = Dark
-theme-light = Light
+theme-dark = Chessdesk Dark
+theme-light = Chessdesk Light
 pieces = Pieces
 font-size = Font size
 corner-radius = Corner radius
@@ -166,11 +191,15 @@ board-size = Board size
 board-size-value = { $percent }% of the room there is
 animate-moves = Animate moves
 animate-moves-hint = Opponent moves and stepping through a game glide into place
+opponent-delay = Opponent delay
+opponent-delay-value = Each opponent move takes at least { $seconds } s
 sound-pack = Sound pack
 sound-off = Off
 volume = Volume
 volume-value = { $percent }%
 downloading = Downloading, { $percent }%
+font-needed = This language needs the { $font } font
+font-download-size = A { $megabytes } MB download, shown in the title bar as it runs
 installed = Installed
 download = Download
 update = Update
@@ -193,6 +222,12 @@ agent-needs-node = This agent needs Node.js.
 agent-adapter-missing = The { $agent } adapter isn't installed.
 stockfish-missing = Stockfish is not installed.
 maia-missing = Maia needs lc0 and its networks.
+stockfish-needed = { $feature ->
+    [likelihood] Win likelihood needs Stockfish
+    [tutoring] Tutoring needs Stockfish
+   *[both] Win likelihood and tutoring need Stockfish
+}
+stockfish-download-size = About 80 MB, shown in the title bar as it downloads
 
 ## Exporting
 
@@ -212,6 +247,8 @@ error-export-game = could not export the game: { $error }
 error-save-setting = could not save the setting: { $error }
 error-download = download failed: { $error }
 error-install = install failed: { $error }
+error-update-check = could not check for updates: { $error }
+error-restart = could not restart: { $error }
 error-review = Review: { $error }
 error-no-data-folder = no data folder on this system
 invalid-position = That starting position is not valid.

@@ -16,6 +16,7 @@ fluent-bundle = "0.16.0"
 gpui = "0.2.2"
 jiff = "0.2"
 notify = "8"
+nucleo-matcher = "0.3"
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "vorbis", "wav"] }
 serde.workspace = true
 shakmaty.workspace = true
@@ -24,7 +25,11 @@ toml = { workspace = true, features = ["display"] }
 toml_edit = "0.25"
 trash = "5"
 unic-langid = "0.9.6"
+url = "2"
 which = "8"
+
+[dev-dependencies]
+proptest.workspace = true
 
 [build-dependencies]
 winresource = "0.1"

@@ -1,0 +1,15 @@
+name = "lang-zh"
+version = "1.0.0"
+description = "简体中文版 Chessdesk"
+license = "GPL-3.0-or-later"
+
+[[languages]]
+name = "简体中文"
+locale = "zh-CN"
+file = "zh.ftl"
+
+# Too large to bundle: Chessdesk offers to fetch it when the language is picked.
+[languages.font]
+family = "Noto Sans SC"
+url = "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf"
+bytes = 8331336

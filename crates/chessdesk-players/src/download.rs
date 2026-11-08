@@ -1,11 +1,16 @@
 //! Fetching engines from their official GitHub releases, so that nobody has to hunt for
-//! the right build. Blocking, like the rest of this crate.
+//! the right build, fonts too large to bundle, and Chessdesk's own releases. Blocking, like the rest of this crate.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::thread;
+use std::time::Duration;
 
 use serde::Deserialize;
+use ureq::http::Response;
+use ureq::{Agent, Body};
 
 const STOCKFISH_RELEASES: &str =
     "https://api.github.com/repos/official-stockfish/Stockfish/releases/latest";
@@ -16,6 +21,33 @@ pub const MAIA_LEVELS: [u32; 9] = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 180
 /// GitHub's API turns away requests without one.
 const USER_AGENT: &str = "Chessdesk";
 const CHUNK: usize = 64 * 1024;
+/// How often a request is tried while the server is struggling, and the first pause between
+/// tries, which grows with each.
+const ATTEMPTS: u32 = 3;
+const RETRY_AFTER: Duration = Duration::from_secs(2);
+/// How long a server gets to answer at all. Not how long a download may take: large files
+/// on a slow line take minutes.
+const ANSWER_WITHIN: Duration = Duration::from_secs(20);
+
+/// Gives up on a server that doesn't answer, which would otherwise hang a download forever.
+static AGENT: LazyLock<Agent> = LazyLock::new(|| {
+    Agent::config_builder()
+        .timeout_connect(Some(ANSWER_WITHIN))
+        .timeout_recv_response(Some(ANSWER_WITHIN))
+        .build()
+        .into()
+});
+
+/// Fetches the font at `url` as `target`. It only takes that name once whole, so that a
+/// broken download never passes for the font.
+pub fn install_font(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
+    if let Some(folder) = target.parent() {
+        fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    }
+    let partial = target.with_extension("part");
+    fetch(url, &partial, progress)?;
+    fs::rename(&partial, target).map_err(|error| error.to_string())
+}
 
 #[derive(Debug, Deserialize)]
 struct Release {
@@ -23,9 +55,9 @@ struct Release {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
+pub(crate) struct Asset {
+    pub(crate) name: String,
+    pub(crate) browser_download_url: String,
 }
 
 /// The end of the Stockfish archive for this operating system and CPU.
@@ -46,7 +78,7 @@ fn lc0_suffix(os: &str) -> Option<&'static str> {
     (os == "windows").then_some("windows-cpu-dnnl.zip")
 }
 
-fn pick<'a>(assets: &'a [Asset], suffix: &str) -> Option<&'a Asset> {
+pub(crate) fn pick<'a>(assets: &'a [Asset], suffix: &str) -> Option<&'a Asset> {
     assets.iter().find(|asset| asset.name.ends_with(suffix))
 }
 
@@ -60,11 +92,52 @@ pub fn can_download_lc0() -> bool {
     lc0_suffix(std::env::consts::OS).is_some()
 }
 
+/// A request to `url`, tried again after a pause while the server says it's struggling:
+/// GitHub turns requests away for minutes at a time now and then.
+pub(crate) fn get(url: &str) -> Result<Response<Body>, String> {
+    let mut attempt = 1;
+    loop {
+        match AGENT.get(url).header("User-Agent", USER_AGENT).call() {
+            Ok(response) => return Ok(response),
+            Err(error) if attempt < ATTEMPTS && is_passing(&error) => {
+                thread::sleep(RETRY_AFTER * attempt);
+                attempt += 1;
+            }
+            Err(error) => return Err(explain(url, &error)),
+        }
+    }
+}
+
+/// Whether trying again soon might go better: the server's own trouble, or no answer.
+fn is_passing(error: &ureq::Error) -> bool {
+    matches!(
+        error,
+        ureq::Error::StatusCode(500..=599) | ureq::Error::Timeout(_)
+    )
+}
+
+/// What went wrong, saying so when it's the server's trouble rather than the app's.
+fn explain(url: &str, error: &ureq::Error) -> String {
+    let host = url
+        .parse::<ureq::http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(str::to_owned))
+        .unwrap_or_else(|| url.to_owned());
+    match error {
+        ureq::Error::StatusCode(status @ 500..=599) => {
+            format!(
+                "{host} isn't answering (HTTP {status}). It may be down for a while; try again later"
+            )
+        }
+        ureq::Error::Timeout(_) => {
+            format!("{host} isn't answering. It may be down for a while; try again later")
+        }
+        error => error.to_string(),
+    }
+}
+
 fn latest_assets(url: &str) -> Result<Vec<Asset>, String> {
-    let body = ureq::get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|error| error.to_string())?
+    let body = get(url)?
         .body_mut()
         .read_to_string()
         .map_err(|error| error.to_string())?;
@@ -73,11 +146,8 @@ fn latest_assets(url: &str) -> Result<Vec<Asset>, String> {
 }
 
 /// Saves `url` to `target`, reporting the share done from 0 to 1 when the size is known.
-fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
-    let response = ureq::get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|error| error.to_string())?;
+pub(crate) fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
+    let response = get(url)?;
     let total = response.body().content_length();
     let mut reader = response.into_body().into_reader();
     let mut file = File::create(target).map_err(|error| error.to_string())?;
@@ -100,7 +170,7 @@ fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), 
 }
 
 /// Unpacks an archive into `folder`. Both libraries refuse paths leading out of it.
-fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
+pub(crate) fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
     let file = File::open(archive).map_err(|error| error.to_string())?;
     if archive
         .extension()
@@ -118,7 +188,7 @@ fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
 
 /// Finds the program in an unpacked archive, wherever it put it: the first file whose
 /// name starts with `prefix`, and on Windows ends in `.exe`.
-fn find_program(folder: &Path, prefix: &str) -> io::Result<Option<PathBuf>> {
+pub(crate) fn find_program(folder: &Path, prefix: &str) -> io::Result<Option<PathBuf>> {
     let mut folders = vec![folder.to_owned()];
     while let Some(current) = folders.pop() {
         let mut entries: Vec<_> = fs::read_dir(current)?.flatten().map(|e| e.path()).collect();
@@ -207,6 +277,19 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     use super::*;
+
+    #[test]
+    fn server_trouble_is_tried_again_and_said_to_be_theirs() {
+        let busy = ureq::Error::StatusCode(504);
+        assert!(is_passing(&busy));
+        assert!(!is_passing(&ureq::Error::StatusCode(404)));
+        let said = explain("https://api.github.com/repos/x/y", &busy);
+        assert!(said.starts_with("api.github.com isn't answering (HTTP 504)"));
+        assert_eq!(
+            explain("https://example.com/a", &ureq::Error::StatusCode(404)),
+            "http status: 404"
+        );
+    }
 
     fn asset(name: &str) -> Asset {
         Asset {
