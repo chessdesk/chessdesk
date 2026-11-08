@@ -3,6 +3,29 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 1.7.0 - 2026-11-08
+
+### Added
+
+- Opponent delay setting: each opponent move takes at least this long, 1 second by default
+- The error bar copies a trace: the full error, the version and platform, the game in play and
+  this run's errors, with the home folder left out
+- Report issue in the error bar opens a GitHub issue with the trace filled in
+- Copy trace says Copied for a moment
+- Agent settings at the bottom of the Review menu
+- Hindi and Simplified Chinese. Picking either offers to download its Noto font, shown in the
+  title bar as it runs; the welcome waits for it before letting you start
+- Language plugins can name a font and where to download it
+- `chessdesk reset` (`just reset`) moves everything Chessdesk keeps on the machine to the trash,
+  after typing `reset` to confirm
+
+### Changed
+
+- Both Analyze lists show every agent, greyed out until its adapter is set up
+- The new logotype, with the crown before the name
+- What's missing before an opponent can play shows as a card with a button, like the other cards
+- Setting descriptions sit closer together
+
 ## 1.6.0 - 2026-11-08
 
 ### Added

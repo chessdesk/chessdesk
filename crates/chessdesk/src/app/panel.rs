@@ -26,9 +26,6 @@ use crate::ui::{self, Icon, Logo, Transition};
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
 /// White's side of the bar, whatever the theme does with light and dark.
 const WHITE_SIDE: u32 = 0xf0f0ee;
-/// How round wide, flat shapes are against the corner radius: on them it looks stronger
-/// than it does on a button.
-const FLAT_RADIUS_SCALE: f32 = 0.7;
 /// A letter's width against the font size, for telling whether a label fits.
 const LABEL_LETTER_WIDTH: f32 = 0.56;
 /// From the bar's end to a label.
@@ -37,12 +34,10 @@ const LABEL_PADDING: Pixels = px(8.);
 const ALL_OF_THE_BAR: f32 = 0.98;
 const GRAPH_HEIGHT: Pixels = px(72.);
 const NUMBER_WIDTH: Pixels = px(30.);
-/// How strongly the result's colour tints its background.
-const RESULT_TINT: f32 = 0.16;
-/// How strongly a verdict card's details show, next to its verdict.
-const FEEDBACK_DETAIL: f32 = 0.75;
 /// What the panel's padding takes off the width of the Analyze button's choices.
 const ANALYZE_MENU_INSET: Pixels = px(24.);
+/// How faint the logo of an agent that isn't set up is, beside its greyed-out name.
+const UNAVAILABLE_OPACITY: f32 = 0.4;
 /// How long a section of the game panel takes to fold or open.
 const FOLD: Duration = Duration::from_millis(200);
 /// How much of the room the opponent's section and the moves share the moves may take, at
@@ -308,8 +303,8 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
             .flex_none()
             .px_2()
             .py_1()
-            .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
-            .bg(color.opacity(RESULT_TINT))
+            .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
+            .bg(color.opacity(ui::CARD_TINT))
             .text_color(color)
             .child(format!("{text}{}", ending.unwrap_or_default())),
     )
@@ -327,7 +322,7 @@ fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
         Verdict::Blunder => colors.mark(Mark::Red),
     };
     // The rest in the card's own colour, quieter than the verdict.
-    let detail = color.opacity(FEEDBACK_DETAIL);
+    let detail = color.opacity(ui::CARD_DETAIL);
     let percent = |share: f32| (share * 100.).round() as u32;
     let likelihood = feedback.likelihood.map(|(before, after)| {
         tr_with!(
@@ -347,8 +342,8 @@ fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
         .gap_0p5()
         .px_2()
         .py_1()
-        .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
-        .bg(color.opacity(RESULT_TINT))
+        .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
+        .bg(color.opacity(ui::CARD_TINT))
         .child(
             div()
                 .flex()
@@ -400,7 +395,7 @@ fn black_side(settings: &Settings) -> Hsla {
 /// rests in the middle. With `None`, nothing is known and only the frame shows. The parts
 /// are round themselves, as a parent's rounding doesn't clip what's inside it.
 fn likelihood_bar(white: Option<f32>, width: Pixels, settings: &Settings) -> Div {
-    let radius = settings.corner_radius * FLAT_RADIUS_SCALE;
+    let radius = settings.corner_radius * ui::FLAT_RADIUS_SCALE;
     let bar = div()
         .relative()
         .flex_none()
@@ -952,25 +947,32 @@ impl Chessdesk {
                     this.analyze(cx);
                 }));
             let folder = Settings::adapters_dir().unwrap_or_default();
-            let agents = AgentKind::ALL
-                .into_iter()
-                .filter(|kind| adapters::readiness(*kind, &folder) == Readiness::Ready)
-                .enumerate()
-                .map(|(index, kind)| {
-                    ui::list_row(("analyze-agent", index), false, &settings)
-                        .gap_1p5()
-                        .text_color(settings.colors.text)
-                        .child(ui::logo(
-                            Logo::of_agent(kind),
-                            settings.ui_font_size * ui::LOGO_SCALE,
-                            settings.colors.text,
-                        ))
-                        .child(kind.name())
-                        .on_click(cx.listener(move |this, _, _, cx| {
+            // Every agent, greyed out until it's set up, so that they can all be found.
+            let agents = AgentKind::ALL.into_iter().enumerate().map(|(index, kind)| {
+                let ready = adapters::readiness(kind, &folder) == Readiness::Ready;
+                let row = ui::list_row(("analyze-agent", index), false, &settings)
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .when(!ready, |mark| mark.opacity(UNAVAILABLE_OPACITY))
+                            .child(ui::logo(
+                                Logo::of_agent(kind),
+                                settings.ui_font_size * ui::LOGO_SCALE,
+                                settings.colors.text,
+                            )),
+                    )
+                    .child(kind.name());
+                if ready {
+                    row.text_color(settings.colors.text).on_click(cx.listener(
+                        move |this, _, _, cx| {
                             this.analyze_menu = false;
                             this.review_with(kind, cx);
-                        }))
-                });
+                        },
+                    ))
+                } else {
+                    row.cursor_default().text_color(settings.colors.muted)
+                }
+            });
             deferred(
                 anchored().anchor(Corner::BottomLeft).child(
                     div().pb_1().child(ui::rise_in(

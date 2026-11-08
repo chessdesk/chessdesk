@@ -21,6 +21,8 @@ const CONTENT_WIDTH: Pixels = px(560.);
 const BOARD_SIZES: [f64; 11] = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.];
 const FONT_SIZES: [f64; 7] = [10., 11., 12., 13., 14., 15., 16.];
 const CORNER_RADII: [f64; 9] = [0., 1., 2., 3., 4., 5., 6., 7., 8.];
+/// `opponent_delay` in the file, in seconds.
+const OPPONENT_DELAYS: [f64; 8] = [0., 0.5, 1., 1.5, 2., 3., 4., 5.];
 const VOLUMES: [f64; 11] = [0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.];
 /// Every key, as the Game menu's shortcuts and the board's own: the id of what it does,
 /// and the key.
@@ -179,6 +181,40 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// The language picked asks for a font that isn't here yet: what it is, and the way to
+    /// fetch it, which shows in the title bar while it runs.
+    fn font_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let settings = Settings::get(cx);
+        let font = settings.missing_font.clone()?;
+        let message = tr_with!("font-needed", font = font.family.as_str());
+        let size = font.bytes.map(|bytes| {
+            let megabytes = format!("{:.1}", bytes as f64 / 1_000_000.);
+            tr_with!("font-download-size", megabytes = megabytes)
+        });
+        let fetching = self
+            .installs
+            .read(cx)
+            .font()
+            .map(|(family, _)| family.clone());
+        let button = |busy| ui::notice_button("download-font", tr("download"), busy, &settings);
+        let action = match fetching {
+            Some(family) if family == font.family => button(true),
+            // Another language's font, picked before this one: one at a time.
+            Some(_) => button(true).opacity(0.5),
+            None => button(false).on_click(cx.listener(move |this, _, _, cx| {
+                let font = font.clone();
+                this.installs
+                    .update(cx, |installs, cx| installs.download_font(font, cx));
+            })),
+        };
+        Some(
+            ui::notice(message, size, &settings)
+                .mb_1()
+                .child(action)
+                .into_any_element(),
+        )
+    }
+
     /// A row with a stepped slider over numbers in the config file.
     fn number(
         key: &'static str,
@@ -233,15 +269,16 @@ impl SettingsView {
 
     fn appearance(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
-        vec![
-            self.select(
-                "language",
-                tr("language"),
-                &settings.language,
-                &settings.language_names,
-                window,
-                cx,
-            ),
+        let mut rows = vec![self.select(
+            "language",
+            tr("language"),
+            &settings.language,
+            &settings.language_names,
+            window,
+            cx,
+        )];
+        rows.extend(self.font_notice(cx));
+        rows.extend([
             self.select(
                 "theme",
                 tr("theme"),
@@ -274,7 +311,8 @@ impl SettingsView {
                 window,
                 cx,
             ),
-        ]
+        ]);
+        rows
     }
 
     fn board(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -305,6 +343,18 @@ impl SettingsView {
                 tr("animate-moves"),
                 tr("animate-moves-hint"),
                 settings.animate_moves,
+                window,
+                cx,
+            ),
+            Self::number(
+                "opponent_delay",
+                tr("opponent-delay"),
+                (&OPPONENT_DELAYS, settings.opponent_delay.as_secs_f64()),
+                tr_with!(
+                    "opponent-delay-value",
+                    seconds = settings.opponent_delay.as_secs_f64()
+                )
+                .to_string(),
                 window,
                 cx,
             ),
@@ -601,15 +651,16 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
-        vec![
-            self.select(
-                "language",
-                tr("language"),
-                &settings.language,
-                &settings.language_names,
-                window,
-                cx,
-            ),
+        let mut rows = vec![self.select(
+            "language",
+            tr("language"),
+            &settings.language,
+            &settings.language_names,
+            window,
+            cx,
+        )];
+        rows.extend(self.font_notice(cx));
+        rows.extend([
             self.select(
                 "theme",
                 tr("theme"),
@@ -642,7 +693,8 @@ impl SettingsView {
                 window,
                 cx,
             ),
-        ]
+        ]);
+        rows
     }
 
     /// The current page, for the board's place.

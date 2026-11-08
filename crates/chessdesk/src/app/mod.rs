@@ -34,6 +34,7 @@ use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
 use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
+use crate::trace::Trace;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
 use panel::{Folds, LogSpace};
@@ -68,7 +69,7 @@ const WATCH_SETTLE: Duration = Duration::from_millis(250);
 /// The room kept around the board.
 const BOARD_MARGIN: Pixels = px(24.);
 /// The rows above and below the board, and how far they keep from it.
-const NO_GAME_LOGOTYPE_HEIGHT: Pixels = px(35.);
+const NO_GAME_LOGOTYPE_HEIGHT: Pixels = px(25.);
 const MATERIAL_ROW: Pixels = px(22.);
 const MATERIAL_GAP: Pixels = px(4.);
 const MATERIAL_ICON_SCALE: f32 = 1.5;
@@ -157,6 +158,10 @@ pub struct Chessdesk {
     /// While open, the settings' pages take the history's place and their content the board's.
     settings_page: Option<(Entity<SettingsView>, [Subscription; 2])>,
     errors: Vec<SharedString>,
+    /// Every error of this run, for the trace copied or filed from the error bar.
+    trace: Trace,
+    /// When the trace was last copied, to say so on the button for a moment.
+    trace_copied: Option<Instant>,
     /// Engines and adapters being fetched, and what listens to them: redraws and events.
     installs: (Entity<Installs>, [Subscription; 2]),
 }
@@ -204,9 +209,15 @@ impl Chessdesk {
             dialog: None,
             export: None,
             settings_page: None,
-            errors: errors.into_iter().map(SharedString::from).collect(),
+            errors: Vec::new(),
+            trace: Trace::new(),
+            trace_copied: None,
             installs: (installs, [redraw, events]),
         };
+        for error in errors {
+            this.trace.record(&error);
+            this.errors.push(error.into());
+        }
         if Settings::is_first_run() {
             this.show_onboarding(cx);
         } else if this.history.is_empty() {
@@ -274,8 +285,20 @@ impl Chessdesk {
     }
 
     fn report(&mut self, error: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.errors.push(error.into());
+        let error = error.into();
+        self.trace.record(&error);
+        self.errors.push(error);
         cx.notify();
+    }
+
+    /// What the game on show is, for a trace: who's playing, not their names.
+    fn traced_game(&self) -> String {
+        let session = self.session();
+        let moves = session.game.moves().len();
+        match &session.live {
+            Some(live) => format!("against {}, {moves} moves", live.setup.opponent.name()),
+            None => format!("none being played, {moves} moves on show"),
+        }
     }
 
     fn show_new_game(&mut self, cx: &mut Context<Self>) {
@@ -328,6 +351,13 @@ impl Chessdesk {
     fn reload_settings(&mut self, cx: &mut Context<Self>) {
         let (settings, errors) = Settings::load();
         Settings::set(settings, cx);
+        // Settings are read again on each change, with the same errors as before.
+        for error in errors
+            .iter()
+            .filter(|error| !self.errors.iter().any(|shown| shown == *error))
+        {
+            self.trace.record(error);
+        }
         self.errors = errors.into_iter().map(SharedString::from).collect();
         cx.refresh_windows();
     }

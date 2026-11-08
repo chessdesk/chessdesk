@@ -314,7 +314,9 @@ impl Chessdesk {
         let mut opponent = live.opponent.take();
         let plan = live.plan.clone();
         let instructions = live.setup.instructions.clone();
+        let delay = Settings::get(cx).opponent_delay;
         cx.spawn(async move |this, cx| {
+            let asked = Instant::now();
             let (opponent, decision) = cx
                 .background_spawn(async move {
                     let started = match opponent.take() {
@@ -330,6 +332,10 @@ impl Chessdesk {
                     }
                 })
                 .await;
+            // A move that comes at once is easy to miss, and feels like no thought at all.
+            if let Some(rest) = delay.checked_sub(asked.elapsed()) {
+                cx.background_executor().timer(rest).await;
+            }
             this.update(cx, |this, cx| {
                 this.on_decision(id, epoch, opponent, decision, cx);
             })

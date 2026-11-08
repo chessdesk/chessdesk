@@ -1,8 +1,10 @@
 //! What sits around the board: the menu row with the logo, and what comes and goes.
 
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use chessdesk_players::acp::AgentKind;
+use chessdesk_players::adapters::{self, Readiness};
 use gpui::{
     Action, AnyElement, App, ClipboardItem, Context, Div, MouseButton, MouseDownEvent,
     MouseMoveEvent, Pixels, SharedString, Window, WindowControlArea, anchored, deferred, div, img,
@@ -17,6 +19,8 @@ use super::{
 };
 use crate::i18n::{tr, tr_with};
 use crate::settings::Settings;
+use crate::settings_view::SettingsPage;
+use crate::trace;
 use crate::ui::{self, Icon};
 
 /// From the top of a menu label to its dropdown.
@@ -27,6 +31,8 @@ const LOGO_HEIGHT: Pixels = px(11.);
 /// The room the macOS window buttons take at the left of the bar, placed by `main`.
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 const PROMOTION_SIZE: Pixels = px(64.);
+/// How long the trace's button says it was copied.
+const COPIED_FOR: Duration = Duration::from_secs(2);
 /// The widest the loading bar gets, in the room between the menus and the window controls.
 const LOADING_BAR_WIDTH: Pixels = px(360.);
 /// The menus, as the ids of their titles.
@@ -34,7 +40,7 @@ const MENUS: [&str; 3] = ["menu-game", "menu-review", "menu-view"];
 /// The menu behind the logo, after the others among the open menus.
 const BRAND_MENU: usize = MENUS.len();
 const ABOUT_WIDTH: Pixels = px(360.);
-const ABOUT_LOGOTYPE_HEIGHT: Pixels = px(30.);
+const ABOUT_LOGOTYPE_HEIGHT: Pixels = px(22.);
 const REPOSITORY: &str = "https://github.com/chessdesk/chessdesk";
 const COPYRIGHT: &str = "© 2026 Team Chessdesk";
 
@@ -92,12 +98,20 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
         ],
         1 => {
             let mut entries = vec![Some(action("analyze-with-stockfish", None, &Analyze)), None];
+            let folder = Settings::adapters_dir().unwrap_or_default();
             entries.extend(AgentKind::ALL.map(|kind| {
-                Some(entry(
-                    tr_with!("review-with", agent = kind.name()),
-                    move |this, _, cx| this.review_with(kind, cx),
-                ))
+                let title = tr_with!("review-with", agent = kind.name());
+                // Greyed out until its adapter is set up, which the last entry leads to.
+                Some(if adapters::readiness(kind, &folder) == Readiness::Ready {
+                    entry(title, move |this, _, cx| this.review_with(kind, cx))
+                } else {
+                    unavailable(title)
+                })
             }));
+            entries.push(None);
+            entries.push(Some(entry(tr("agent-settings"), |this, _, cx| {
+                this.show_settings(SettingsPage::Agents, cx);
+            })));
             entries
         }
         BRAND_MENU => vec![
@@ -456,15 +470,36 @@ impl Chessdesk {
         )
     }
 
+    /// Says "Copied" on the trace's button for a moment. A later copy starts the moment
+    /// over, so an earlier one's end leaves it be.
+    fn show_copied(&mut self, cx: &mut Context<Self>) {
+        let copied = Instant::now();
+        self.trace_copied = Some(copied);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_FOR).await;
+            this.update(cx, |this, cx| {
+                if this.trace_copied == Some(copied) {
+                    this.trace_copied = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// What went wrong, along the bottom until closed.
     pub(super) fn render_errors(
         &self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let copied = self.errors.first()?.clone();
-        // The rest of a long message comes along in what gets copied.
-        let error = copied.lines().next().unwrap_or_default().to_owned();
+        let shown = self.errors.first()?;
+        // The rest of a long message comes along in the trace.
+        let error = shown.lines().next().unwrap_or_default().to_owned();
+        let report = self.trace.report(shown, &self.traced_game());
+        let issue = trace::issue_url(&report);
         let settings = Settings::get(cx);
         Some(
             div()
@@ -483,16 +518,29 @@ impl Chessdesk {
                         .child(div().flex_1().min_w_0().truncate().child(error))
                         .child(
                             ui::button("copy-error", false, &settings)
-                                .on_click(move |_, _, cx| {
-                                    let text = copied.to_string();
-                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                })
-                                .child(tr("copy")),
+                                .h(ui::CONTROL_HEIGHT)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        report.clone(),
+                                    ));
+                                    this.show_copied(cx);
+                                }))
+                                .child(tr(if self.trace_copied.is_some() {
+                                    "copied"
+                                } else {
+                                    "copy-trace"
+                                })),
+                        )
+                        .child(
+                            ui::action_button("report-error", tr("report-issue"), &settings)
+                                .on_click(move |_, _, cx| cx.open_url(&issue)),
                         )
                         .child(
                             ui::button("close-error", true, &settings)
+                                .h(ui::CONTROL_HEIGHT)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.errors.remove(0);
+                                    this.trace_copied = None;
                                     cx.notify();
                                 }))
                                 .child(tr("close")),

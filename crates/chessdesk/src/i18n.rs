@@ -110,7 +110,8 @@ pub fn detected(languages: &[Language]) -> String {
     language.map_or_else(|| ENGLISH.to_owned(), |language| language.name)
 }
 
-fn chosen<'a>(name: &str, languages: &'a [Language]) -> Result<Option<&'a Language>, String> {
+/// The language `name` stands for, `None` for English.
+pub fn chosen<'a>(name: &str, languages: &'a [Language]) -> Result<Option<&'a Language>, String> {
     match name {
         ENGLISH => Ok(None),
         SYSTEM => Ok(sys_locale::get_locale().and_then(|locale| matching(&locale, languages))),
@@ -273,6 +274,7 @@ mod tests {
             description: None,
             locale: locale.to_owned(),
             file: PathBuf::new(),
+            font: None,
         };
         let languages = [language("de"), language("pt-BR")];
         assert_eq!(matching("de-DE", &languages).unwrap().locale, "de");
@@ -298,7 +300,7 @@ mod tests {
     fn bundled_translations_match_english() {
         let english = arguments(ENGLISH_SOURCE);
         let translations = bundled::translations();
-        assert_eq!(translations.len(), 3);
+        assert_eq!(translations.len(), 5);
         for (path, source) in translations {
             let (_, problems) = bundle("de".parse().unwrap(), source.to_owned());
             assert_eq!(problems, None, "{path}");

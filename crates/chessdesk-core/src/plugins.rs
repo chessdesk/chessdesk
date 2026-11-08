@@ -93,6 +93,7 @@ struct LanguageEntry {
     name: String,
     locale: String,
     file: PathBuf,
+    font: Option<Font>,
 }
 
 /// A board: a picture of the squares, a8 at the top left, in PNG or JPEG.
@@ -134,6 +135,58 @@ pub struct Language {
     pub locale: String,
     /// A Project Fluent file.
     pub file: PathBuf,
+    /// A font for the language's script, too large to come with the plugin: Chessdesk offers
+    /// to fetch it, and once it's here it's the interface font.
+    pub font: Option<Font>,
+}
+
+/// A font a language asks for. It should cover Latin as well, since it stands in for the
+/// interface font everywhere.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Font {
+    /// As the font file names it.
+    pub family: String,
+    /// An `https` address of a TrueType or OpenType file. Best a fixed version, so that
+    /// what's fetched never changes.
+    pub url: String,
+    /// The download's size, to say before it starts.
+    pub bytes: Option<u64>,
+}
+
+impl Font {
+    /// What it's saved as: its family, with the file type of the download.
+    pub fn file_name(&self) -> String {
+        format!("{}.{}", self.family, self.extension().unwrap_or("ttf"))
+    }
+
+    /// The download's file type, if it's one that holds a font.
+    fn extension(&self) -> Option<&'static str> {
+        let extension = Path::new(&self.url).extension()?.to_str()?;
+        ["ttf", "otf"]
+            .into_iter()
+            .find(|known| extension.eq_ignore_ascii_case(known))
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if !self.url.to_ascii_lowercase().starts_with("https://") {
+            return Err(format!(
+                "font {}: the address must start with https://",
+                self.family
+            ));
+        }
+        if self.extension().is_none() {
+            return Err(format!(
+                "font {}: the address must end in .ttf or .otf",
+                self.family
+            ));
+        }
+        // The family names a file: nothing that could lead out of the fonts folder.
+        if self.family.is_empty() || self.family.contains(['/', '\\', '.', ':']) {
+            return Err(format!("font {}: not a family name", self.family));
+        }
+        Ok(())
+    }
 }
 
 /// A colour theme, selected by `name`.
@@ -313,6 +366,9 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
         if metadata.len() > MAX_LANGUAGE_BYTES {
             return Err(format!("{} is larger than 1 MiB", file.display()));
         }
+        if let Some(font) = &entry.font {
+            font.check()?;
+        }
         found.languages.push(Language {
             name: entry.name,
             plugin: manifest.name.clone(),
@@ -320,6 +376,7 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
             description: manifest.description.clone(),
             locale: entry.locale,
             file,
+            font: entry.font,
         });
     }
     Ok(found)
@@ -364,6 +421,42 @@ pub fn discover(root: &Path) -> Plugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn font(family: &str, url: &str) -> Font {
+        Font {
+            family: family.to_owned(),
+            url: url.to_owned(),
+            bytes: None,
+        }
+    }
+
+    #[test]
+    fn a_font_is_saved_under_its_family() {
+        let otf = font("Noto Sans SC", "https://example.com/NotoSansSC-Regular.OTF");
+        assert_eq!(otf.file_name(), "Noto Sans SC.otf");
+        let ttf = font(
+            "Noto Sans Devanagari",
+            "https://example.com/Noto%5Bwght%5D.ttf",
+        );
+        assert_eq!(ttf.file_name(), "Noto Sans Devanagari.ttf");
+        assert!(otf.check().is_ok() && ttf.check().is_ok());
+    }
+
+    #[test]
+    fn a_font_comes_over_https_as_a_font_file() {
+        assert!(font("Noto", "http://example.com/a.ttf").check().is_err());
+        assert!(font("Noto", "https://example.com/a.zip").check().is_err());
+    }
+
+    #[test]
+    fn a_font_family_cannot_lead_out_of_the_fonts_folder() {
+        for family in ["", "../evil", r"..\evil", "C:evil", "a/b"] {
+            assert!(
+                font(family, "https://example.com/a.ttf").check().is_err(),
+                "{family}"
+            );
+        }
+    }
 
     /// A plugins folder under the system's temp folder, removed afterwards.
     struct Scratch(PathBuf);

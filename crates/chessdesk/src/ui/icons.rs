@@ -12,7 +12,7 @@ use gpui::{
 use shakmaty::Role;
 
 /// The logotype's width for its height.
-const LOGOTYPE_WIDTH: f32 = 211. / 43.;
+const LOGOTYPE_WIDTH: f32 = 255. / 30.;
 
 macro_rules! icons {
     ($($name:ident => $file:literal),* $(,)?) => {

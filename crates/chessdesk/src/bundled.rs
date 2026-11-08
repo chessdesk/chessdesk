@@ -71,6 +71,10 @@ const FILES: &[(&str, &[u8])] = bundle!(
     "lang-es/es.ftl",
     "lang-fr/plugin.toml",
     "lang-fr/fr.ftl",
+    "lang-hi/plugin.toml",
+    "lang-hi/hi.ftl",
+    "lang-zh/plugin.toml",
+    "lang-zh/zh.ftl",
     "celeste/plugin.toml",
     "celeste/celeste.toml",
     "mariana/plugin.toml",
@@ -187,7 +191,16 @@ mod tests {
         let packs: Vec<_> = plugins.sound_packs.iter().map(|pack| &pack.name).collect();
         assert_eq!(packs, ["Soft", "Wood"]);
         let languages: Vec<_> = plugins.languages.iter().map(|known| &known.name).collect();
-        assert_eq!(languages, ["Deutsch", "Español", "Français"]);
+        assert_eq!(
+            languages,
+            ["Deutsch", "Español", "Français", "हिन्दी", "简体中文"]
+        );
+        let fonts: Vec<_> = plugins
+            .languages
+            .iter()
+            .filter_map(|known| Some(known.font.as_ref()?.family.as_str()))
+            .collect();
+        assert_eq!(fonts, ["Noto Sans Devanagari", "Noto Sans SC"]);
     }
 
     #[test]

@@ -12,6 +12,8 @@ just release   # optimized binary at target\release\chessdesk.exe
 just dist      # fully optimized (fat LTO), as released, at target\dist\chessdesk.exe
 just check     # fmt, lint, test, deny
 just hooks     # git hooks, once per clone; needs prek
+just reset     # start over: config, plugins, adapters, engines, fonts and games to the trash,
+               # once you type "reset" (also `cargo run -- reset`)
 ```
 
 The binary carries its font, themes and plugins, so it needs no installing.

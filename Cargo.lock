@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "chessdesk-core",
  "chessdesk-players",
@@ -973,6 +973,7 @@ dependencies = [
  "gpui",
  "jiff",
  "notify",
+ "proptest",
  "rodio",
  "serde",
  "shakmaty",
@@ -981,13 +982,14 @@ dependencies = [
  "toml_edit 0.25.19+spec-1.1.0",
  "trash",
  "unic-langid",
+ "url",
  "which 8.0.6",
  "winresource",
 ]
 
 [[package]]
 name = "chessdesk-core"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "pgn-reader",
  "proptest",
@@ -998,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-players"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "agent-client-protocol",
  "chessdesk-core",

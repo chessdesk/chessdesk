@@ -27,8 +27,13 @@ impl Render for Onboarding {
         let rows = self
             .choices
             .update(cx, |choices, cx| choices.render_welcome(window, cx));
-        let start = ui::primary_button("welcome-done", tr("welcome-start"), &settings)
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(Done)));
+        // Not before the language's font is here: without it, its letters may not show.
+        let start = if settings.missing_font.is_some() {
+            ui::disabled_button("welcome-done", tr("welcome-start"), &settings)
+        } else {
+            ui::primary_button("welcome-done", tr("welcome-start"), &settings)
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(Done)))
+        };
         ui::fade_in(
             "welcome-shade",
             ui::modal("welcome", &settings).child(ui::rise_in(

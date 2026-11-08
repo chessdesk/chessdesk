@@ -1,5 +1,5 @@
 //! Fetching engines from their official GitHub releases, so that nobody has to hunt for
-//! the right build. Blocking, like the rest of this crate.
+//! the right build, and fonts too large to bundle. Blocking, like the rest of this crate.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -16,6 +16,17 @@ pub const MAIA_LEVELS: [u32; 9] = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 180
 /// GitHub's API turns away requests without one.
 const USER_AGENT: &str = "Chessdesk";
 const CHUNK: usize = 64 * 1024;
+
+/// Fetches the font at `url` as `target`. It only takes that name once whole, so that a
+/// broken download never passes for the font.
+pub fn install_font(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
+    if let Some(folder) = target.parent() {
+        fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    }
+    let partial = target.with_extension("part");
+    fetch(url, &partial, progress)?;
+    fs::rename(&partial, target).map_err(|error| error.to_string())
+}
 
 #[derive(Debug, Deserialize)]
 struct Release {

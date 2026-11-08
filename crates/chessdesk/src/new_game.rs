@@ -285,19 +285,14 @@ impl NewGame {
         } else {
             (tr("download-in-settings"), SettingsPage::Engines)
         };
-        let link = opponent.downloadable().then(|| {
-            ui::text_link("download", label, &settings)
+        let action = opponent.downloadable().then(|| {
+            ui::notice_button("download", label, false, &settings)
                 .on_click(cx.listener(move |_, _, _, cx| cx.emit(Event::OpenSettings(page))))
         });
         Some(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_4()
-                .pb_1()
-                .child(div().text_color(settings.colors.callout).child(missing))
-                .children(link)
+            ui::notice(missing, None, &settings)
+                .mb_1()
+                .children(action)
                 .into_any_element(),
         )
     }

@@ -14,7 +14,7 @@ use gpui::{
     Corner, CursorStyle, DispatchPhase, Div, ElementId, Hitbox, HitboxBehavior, Hsla, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Stateful,
     Transformation, Window, anchored, canvas, deferred, div, ease_out_quint, fill, percentage,
-    point, prelude::*, px, size, transparent_black,
+    point, prelude::*, px, relative, size, transparent_black,
 };
 
 use crate::settings::Settings;
@@ -48,6 +48,16 @@ pub const BAR_INSET: Pixels = px(17.);
 pub const LOGO_SCALE: f32 = 1.25;
 /// How much larger a settings row's logo is than its text: about as tall as label and hint.
 const SETTING_LOGO_SCALE: f32 = 2.;
+/// How round wide, flat shapes are against the corner radius: on them it looks stronger
+/// than it does on a button.
+pub const FLAT_RADIUS_SCALE: f32 = 0.7;
+/// How strongly a card's colour tints its background: results, verdicts, notices.
+pub const CARD_TINT: f32 = 0.16;
+/// How strongly a card's details show, next to its main line.
+pub const CARD_DETAIL: f32 = 0.75;
+/// A setting's description, against its font size: closer than GPUI's default, so that
+/// it reads as one block with its label.
+const HINT_LINE_HEIGHT: f32 = 1.3;
 /// How much larger titles are than the text around them.
 const TITLE_SCALE: f32 = 1.3;
 /// One turn of a [`spinner`].
@@ -117,22 +127,6 @@ pub fn disabled_button(
         .text_color(settings.colors.muted)
         .border_1()
         .border_color(settings.colors.popover_border)
-        .child(label.into())
-}
-
-/// Words that do something: a way out of a dead end, such as a missing engine.
-pub fn text_link(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    settings: &Settings,
-) -> Stateful<Div> {
-    let text = settings.colors.text;
-    div()
-        .id(id)
-        .flex_none()
-        .cursor_pointer()
-        .text_color(settings.colors.caret)
-        .hover(move |style| style.text_color(text))
         .child(label.into())
 }
 
@@ -392,6 +386,7 @@ fn setting_label(
         .children(hint.map(|hint| {
             div()
                 .text_size(settings.ui_font_size * 0.92)
+                .line_height(relative(HINT_LINE_HEIGHT))
                 .text_color(settings.colors.muted)
                 .child(hint)
         }))
@@ -406,6 +401,82 @@ fn labelled_row(label: Div) -> Div {
         .min_h(ROW_HEIGHT)
         .py_1()
         .child(label)
+}
+
+/// Something to see to before going on, such as an engine to fetch: a card tinted like a
+/// game's result, its message and a quieter detail beside room for an action, added as a
+/// child.
+pub fn notice(
+    message: impl Into<SharedString>,
+    detail: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let color = settings.colors.callout;
+    let text = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .child(div().text_color(color).child(message.into()))
+        .children(detail.map(|detail| {
+            div()
+                .text_size(settings.ui_font_size * 0.92)
+                .text_color(color.opacity(CARD_DETAIL))
+                .child(detail)
+        }));
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .px_2p5()
+        .py_2()
+        .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
+        .bg(color.opacity(CARD_TINT))
+        .child(text)
+}
+
+/// The button of a [`notice`]: the card's colour, filled a little more strongly than the card,
+/// with no frame. While `busy` a spinner takes the label's place and the button keeps its
+/// width; add `on_click` only when it isn't.
+pub fn notice_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    busy: bool,
+    settings: &Settings,
+) -> Stateful<Div> {
+    let id = id.into();
+    let color = settings.colors.callout;
+    let radius = settings.corner_radius;
+    let label = div().when(busy, Styled::invisible).child(label.into());
+    div()
+        .id(id.clone())
+        .relative()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(CONTROL_HEIGHT)
+        .px_2()
+        .rounded(radius)
+        .text_color(color)
+        .bg(color.opacity(CARD_TINT))
+        .when(!busy, |button| {
+            button
+                .cursor_pointer()
+                .child(hover_fill(color.opacity(CARD_TINT), radius))
+        })
+        .child(label)
+        .when(busy, |button| {
+            button.child(
+                div()
+                    .absolute()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(spinner(id, settings.ui_font_size, color)),
+            )
+        })
 }
 
 /// A switch. Add `on_click`.
