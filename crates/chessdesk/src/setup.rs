@@ -285,7 +285,8 @@ impl Setup {
         self.tutoring() && self.opponent.agent().is_none()
     }
 
-    fn tutoring(&self) -> bool {
+    /// Whether the opponent coaches the player, or Stockfish grades their moves.
+    pub fn tutoring(&self) -> bool {
         self.annotate && self.assisted()
     }
 

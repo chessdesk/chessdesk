@@ -37,7 +37,10 @@ is per turn. `AgentKind::reports_running_total` accounts for that. Codex, OpenCo
 measured yet; they bring their own prompts and tools, so expect far more than Claude.
 
 Tutoring adds about 100 to 300 tokens per turn: three turns took 937, 1,106 and 1,368 with feedback
-on each move.
+on each move. Comments hint at ideas and give the player's next move away only when the
+instructions ask to be taught a line or told what to play: spoiling it is the player's call. Then
+the agent names that one move as `[%next SAN]` and Chessdesk draws its arrow, if it's legal for the
+player. Left to draw it themselves, models marked their own move instead, or the whole plan at once.
 
 Reviewing a game of 8 half-moves with `sonnet` took 1,561 tokens in one call. Longer games cost
 more: the whole PGN goes in, and a comment comes back for each of the player's moves.
@@ -67,6 +70,10 @@ of the network's name. It's a rough fit to a few reports, not a measurement.
 - All chess logic is local: legality, game end, analysis, likelihood.
 - One session per game, so that the provider's prompt cache serves everything said so far.
 - A turn is the last move and the FEN. The FEN keeps takebacks right without a new session.
+- When the player moves first and tutoring is on, the agent gets one extra call before that move,
+  for a comment and markings on the start: it would otherwise say nothing until it had moved. The
+  call also opens the session, so its first move is an ordinary turn. The comment is kept in the
+  PGN tag `ChessdeskIntro`, since the comment before the first move holds the player's notes.
 - Legal moves are listed only after an illegal reply, once. Then the game pauses.
 - Forced moves skip the agent.
 - A review is one call, covering each of the player's moves.

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use chessdesk_core::review::Verdict;
-use chessdesk_core::{Annotations, Arrow, Game, Wdl};
+use chessdesk_core::{Annotations, Arrow, Game, Wdl, annotation};
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::uci::Engine;
 use chessdesk_players::{Opponent, Tokens};
@@ -27,6 +27,10 @@ pub const EVEN: Wdl = Wdl {
     draw: 0,
     black: 500,
 };
+
+/// The PGN tag that keeps what the opponent said before the player's first move, as a
+/// comment. Not the comment before the first move: that one holds the player's notes.
+pub const INTRO_TAG: &str = "ChessdeskIntro";
 
 /// Tells sessions apart for answers arriving from background threads.
 pub type SessionId = u64;
@@ -51,6 +55,9 @@ pub struct Live {
     pub evaluating: bool,
     /// The field for telling an agent how to play, while the game runs.
     pub instructions: Option<(Entity<TextArea>, Subscription)>,
+    /// Whether the opponent has been asked to speak before the player's first move, so that
+    /// one that didn't isn't asked again and again.
+    pub introduced: bool,
 }
 
 /// A promotion waiting for its piece.
@@ -207,16 +214,25 @@ impl Session {
     }
 
     /// The comment for the position on show: the move's own, or on an opponent's move
-    /// without one, what was said just before.
+    /// without one, what was said just before, which near the start is the introduction.
     pub fn shown_comment(&self) -> Option<String> {
         let moves = self.game.moves();
         let shown = self.ply.min(moves.len());
+        let intro = (shown < 2).then(|| self.intro().text);
         moves[..shown]
             .iter()
             .rev()
             .take(2)
             .map(|played| played.annotations.text.clone())
+            .chain(intro)
             .find(|text| !text.is_empty())
+    }
+
+    /// What the opponent said before the player's first move.
+    pub fn intro(&self) -> Annotations {
+        self.game
+            .tag(INTRO_TAG)
+            .map_or_else(Annotations::default, annotation::parse)
     }
 
     /// The legal moves from a square, as where they end up on the board.
@@ -352,11 +368,11 @@ impl Session {
             .collect()
     }
 
-    /// The markings of the shown move.
+    /// The markings of the shown move, or at the start, of the introduction.
     pub fn annotations(&self) -> Annotations {
         let mut annotations = self
             .shown_move()
-            .map_or_else(Annotations::default, |played| played.annotations.clone());
+            .map_or_else(|| self.intro(), |played| played.annotations.clone());
         if let Some(suggestion) = self.shown_suggestion() {
             annotations.arrows.push(suggestion.arrow);
         }
@@ -448,6 +464,26 @@ mod tests {
             session.ply = ply;
             assert_eq!(session.log_row(), row);
         }
+    }
+
+    #[test]
+    fn the_introduction_shows_until_the_opponent_speaks_again() {
+        let mut game = Game::default();
+        game.set_tag(INTRO_TAG, "Let's play the Sicilian. [%cal Gc7c5]");
+        let e4 = shakmaty::san::San::from_ascii(b"e4")
+            .unwrap()
+            .to_move(&game.position())
+            .unwrap();
+        game.play(e4);
+        let mut session = Session::new(0, game);
+        session.ply = 0;
+        let intro = "Let's play the Sicilian.";
+        assert_eq!(session.shown_comment().as_deref(), Some(intro));
+        assert_eq!(session.annotations().arrows.len(), 1);
+        // After the player's first move the words stay, but the arrows were for the start.
+        session.ply = 1;
+        assert_eq!(session.shown_comment().as_deref(), Some(intro));
+        assert_eq!(session.annotations().arrows, []);
     }
 
     #[test]

@@ -17,8 +17,11 @@ use crate::settings::Settings;
 
 /// How long a piece takes to glide to its square.
 pub const SLIDE_TIME: Duration = Duration::from_millis(180);
-const LIGHT_MARK: f32 = 0.45;
-const ARROW_OPACITY: f32 = 0.8;
+/// How strongly arrows and marked squares show: enough to stand out on any board.
+const MARK_OPACITY: f32 = 0.8;
+/// A marked square's ring, as parts of the square: across, and the line's width.
+const MARK_RING: f32 = 0.9;
+const MARK_RING_WIDTH: f32 = 0.08;
 
 /// A piece on its way between squares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,7 +154,7 @@ pub fn render(view: &View, handlers: &Handlers, cx: &App) -> Div {
         |_, _, _| {},
         move |bounds, (), window, _| {
             for arrow in &arrows {
-                let color = colors.mark(arrow.mark).opacity(ARROW_OPACITY);
+                let color = colors.mark(arrow.mark).opacity(MARK_OPACITY);
                 paint_arrow(*arrow, bounds, orientation, size, color, window);
             }
         },
@@ -269,10 +272,14 @@ fn render_square(
     if view.selected == Some(square) {
         tint = Some(colors.caret.opacity(0.4));
     }
-    let marked = view.annotations.highlights.iter().rev();
-    if let Some(found) = marked.into_iter().find(|h| h.square == square) {
-        tint = Some(colors.mark(found.mark).opacity(LIGHT_MARK));
-    }
+    // A ring, not a tint: a tint reads as the last move, and fades into dark squares.
+    let ring = view
+        .annotations
+        .highlights
+        .iter()
+        .rev()
+        .find(|h| h.square == square)
+        .map(|found| mark_ring(cell, colors.mark(found.mark).opacity(MARK_OPACITY)));
     let piece = view.position.board().piece_at(square);
     let gliding_here = view
         .slides
@@ -311,6 +318,7 @@ fn render_square(
                 .filter(|_| !gliding_here)
                 .map(|piece| render_piece(square, piece, view, cell, settings, cx)),
         )
+        .children(ring)
         .when(view.targets.contains(&square), |element| {
             element.child(target_marker(piece.is_some(), cell, colors.caret))
         })
@@ -340,6 +348,24 @@ fn render_piece(
         .when(lifted, |piece| piece.opacity(0.3))
         .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
         .child(piece_image(image, cell))
+}
+
+/// A square marked by an annotation: a ring over whatever stands there, like a circle drawn
+/// on a diagram.
+fn mark_ring(cell: Pixels, color: Hsla) -> Div {
+    div()
+        .absolute()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .size(cell * MARK_RING)
+                .rounded_full()
+                .border(cell * MARK_RING_WIDTH)
+                .border_color(color),
+        )
 }
 
 /// A dot on an empty square, a ring around a capture.

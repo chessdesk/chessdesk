@@ -10,6 +10,12 @@ minor versions bring features, patch versions only fixes.
 - New Game has the kind of game down its side: Casual, with hints, take-backs and tutoring, or
   Competition, on a bullet, blitz, rapid or classical clock with no help. Scenarios are coming soon
 - The clock in New Game says how fast it is: bullet, blitz, rapid or classical
+- With tutoring on, an agent speaks before the first move even when you have White: ask it to
+  teach you the Sicilian and it sets out the plan and marks the board before you start
+- Ask an agent to teach you a line or tell you what to play and its comments name your next move
+  and mark it on the board, so a lesson goes on after the first move. Otherwise they only hint
+- Squares marked by an agent or in a PGN show as a ring, as on Lichess, instead of a tint that
+  looked like the last move and all but vanished on dark squares
 
 ### Changed
 

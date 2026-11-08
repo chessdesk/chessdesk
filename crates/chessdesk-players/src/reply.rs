@@ -4,10 +4,14 @@
 use std::borrow::Cow;
 
 use chessdesk_core::annotation::{self, split_commands};
-use chessdesk_core::{Annotations, Game};
+use chessdesk_core::{Annotations, Arrow, Game, Mark};
 use shakmaty::san::San;
 use shakmaty::uci::UciMove;
-use shakmaty::{Chess, Move, Position};
+use shakmaty::{Chess, Color, Move, Position};
+
+/// The command in which an agent names the player's next move, for the app to draw. Models
+/// write the move well and its arrow badly: their own move instead, or the whole plan.
+const NEXT: &str = "next";
 
 /// Strips what surrounds a move in prose: `1...`, `**Nf3**`, `e5.`. Castling comes out as
 /// `O-O`, the one way the parser reads it, however it was written.
@@ -57,7 +61,45 @@ pub fn parse(reply: &str, position: &Chess) -> Option<(Move, Annotations)> {
         .find_map(|word| Some((parse_move(word, position)?, word)))?;
     let mut annotations = annotation::parse(reply);
     annotations.text = comment_text(&text, word);
+    let mut after = position.clone();
+    after.play_unchecked(played);
+    add_next(&mut annotations, reply, &after);
     Some((played, annotations))
+}
+
+/// Draws the player's next move, if the reply names one that's legal in `position`.
+fn add_next(annotations: &mut Annotations, reply: &str, position: &Chess) {
+    let (_, commands) = split_commands(reply);
+    let arrow = commands
+        .iter()
+        .find(|(name, _)| *name == NEXT)
+        .and_then(|(_, named)| parse_move(named.trim(), position))
+        .and_then(|next| arrow_of(next, position.turn()));
+    if let Some(arrow) = arrow.filter(|arrow| !annotations.arrows.contains(arrow)) {
+        annotations.arrows.push(arrow);
+    }
+}
+
+/// A move as an arrow: castling from the king to where it lands.
+fn arrow_of(played: Move, mover: Color) -> Option<Arrow> {
+    let to = played
+        .castling_side()
+        .map_or(played.to(), |side| side.king_to(mover));
+    Some(Arrow {
+        from: played.from()?,
+        to,
+        mark: Mark::Green,
+    })
+}
+
+/// What the agent said without a move: the comment of an introduction in `position`, and
+/// its markings.
+pub fn remark(reply: &str, position: &Chess) -> Annotations {
+    let (text, _) = split_commands(reply);
+    let mut annotations = annotation::parse(reply);
+    annotations.text = comment_text(&text, "");
+    add_next(&mut annotations, reply, position);
+    annotations
 }
 
 /// What the agent said. A comment in braces is all of it: models sometimes carry on
@@ -148,6 +190,59 @@ mod tests {
         }
         let (played, _) = parse("1...e5", &after(&["e4"]).position()).unwrap();
         assert_eq!(played.to(), Square::E5);
+    }
+
+    #[test]
+    fn a_coaching_reply_keeps_the_pointer_to_the_next_move() {
+        let position = after(&["e4", "e5", "Nf3"]).position();
+        let reply = "Nc6 {Nice. Your bishop's still home, though.} [%cal Gf1c4]";
+        let (played, said) = parse(reply, &position).unwrap();
+        assert_eq!(San::from_move(&position, played).to_string(), "Nc6");
+        assert_eq!(said.text, "Nice. Your bishop's still home, though.");
+        assert_eq!(said.arrows.len(), 1);
+    }
+
+    #[test]
+    fn an_introduction_is_its_comment_and_markings() {
+        let said = remark(
+            "{The Sicilian starts with c5, fighting for d4.} [%cal Gc7c5] [%csl Yd4] Ready?",
+            &Chess::default(),
+        );
+        assert_eq!(said.text, "The Sicilian starts with c5, fighting for d4.");
+        assert_eq!(said.arrows.len(), 1);
+        assert_eq!(said.highlights.len(), 1);
+        assert_eq!(remark("Let's go!", &Chess::default()).text, "Let's go!");
+    }
+
+    #[test]
+    fn the_players_next_move_is_drawn_when_named_and_legal() {
+        let squares = |said: &Annotations| -> Vec<String> {
+            said.arrows
+                .iter()
+                .map(|arrow| format!("{}{}", arrow.from, arrow.to))
+                .collect()
+        };
+        // The agent has White and plays Nf3; the player's next move is ...d6.
+        let reply = "Nf3 {Now ...d6, keeping e5 covered.} [%next d6]";
+        let (_, said) = parse(reply, &after(&["e4", "c5"]).position()).unwrap();
+        assert_eq!(said.text, "Now ...d6, keeping e5 covered.");
+        assert_eq!(squares(&said), ["d7d6"]);
+        // Before the first move, the start is the player's to move.
+        let intro = remark("{Start with e4.} [%next e4]", &Chess::default());
+        assert_eq!(squares(&intro), ["e2e4"]);
+        // Not a move the player can make: nothing drawn.
+        assert_eq!(
+            squares(&remark("{Hm.} [%next e5]", &Chess::default())),
+            [""; 0]
+        );
+    }
+
+    #[test]
+    fn castling_is_drawn_to_where_the_king_lands() {
+        let position = after(&["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]).position();
+        let said = remark("{Castle now.} [%next O-O]", &position);
+        assert_eq!(said.arrows.len(), 1);
+        assert_eq!(said.arrows[0].to.to_string(), "g1");
     }
 
     #[test]
