@@ -3,6 +3,15 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 1.7.1 - 2026-11-08
+
+### Fixed
+
+- Downloads try again when GitHub has trouble answering, and say so when it keeps on, instead
+  of a bare HTTP status
+- A download gives up on a server that doesn't answer within 20 seconds, instead of waiting
+  forever
+
 ## 1.7.0 - 2026-11-08
 
 ### Added
