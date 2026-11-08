@@ -38,6 +38,8 @@ pub struct Live {
     pub player: Color,
     /// `None` until first needed, and while it thinks on a background thread.
     pub opponent: Option<Box<dyn Opponent>>,
+    /// Goes up when `plan` changes, so that an opponent started on the old one is let go.
+    pub plan_version: u64,
     pub thinking: bool,
     /// Why the game stopped, until the player goes on.
     pub paused: Option<SharedString>,
@@ -100,10 +102,12 @@ pub struct Feedback {
 }
 
 /// A hint or the best move, and the position it's for.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Suggestion {
     pub ply: usize,
     pub arrow: Arrow,
+    /// Why, when an agent gave the hint: its words, after its name.
+    pub note: Option<SharedString>,
 }
 
 impl Session {
@@ -343,10 +347,17 @@ impl Session {
         let mut annotations = self
             .shown_move()
             .map_or_else(Annotations::default, |played| played.annotations.clone());
-        if let Some(suggestion) = self.suggestion.filter(|found| found.ply == self.ply) {
+        if let Some(suggestion) = self.shown_suggestion() {
             annotations.arrows.push(suggestion.arrow);
         }
         annotations
+    }
+
+    /// The hint or best move for the position on show, if one was asked for.
+    pub fn shown_suggestion(&self) -> Option<&Suggestion> {
+        self.suggestion
+            .as_ref()
+            .filter(|found| found.ply == self.ply)
     }
 
     pub fn shown_move(&self) -> Option<&chessdesk_core::PlayedMove> {

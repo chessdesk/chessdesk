@@ -7,22 +7,45 @@ use std::time::{Duration, Instant};
 
 use chessdesk_core::review::Verdict;
 use chessdesk_core::{Ending, Mark, PlayedMove};
-use chessdesk_players::acp::AgentKind;
+use chessdesk_players::acp::{AgentKind, Effort};
 use chessdesk_players::adapters::{self, Readiness};
 use gpui::{
-    AnyElement, Axis, Bounds, Context, Corner, Div, Hsla, MouseButton, MouseDownEvent, PathBuilder,
-    Pixels, SharedString, Transformation, Window, anchored, canvas, deferred, div, percentage,
-    point, prelude::*, px,
+    AnyElement, Axis, Bounds, Context, Corner, Div, ElementId, Hsla, MouseButton, MouseDownEvent,
+    PathBuilder, Pixels, SharedString, Transformation, Window, anchored, canvas, deferred, div,
+    percentage, point, prelude::*, px,
 };
 use shakmaty::{Color, Position};
 
 use super::session::{Feedback, Session};
 use super::{Chessdesk, Dragging, clock};
+
+/// A button that offers Stockfish or an agent to do its work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HelperMenu {
+    Analyze,
+    Hint,
+}
+
+impl HelperMenu {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Analyze => "analyze",
+            Self::Hint => "suggest",
+        }
+    }
+}
+
+/// Who does the work a helper menu offers: Stockfish, or an agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Helper {
+    Stockfish,
+    Agent(AgentKind),
+}
 use crate::i18n::{tr, tr_with};
 use crate::installs::{self, NeedsStockfish};
 use crate::library::{Standing, standing};
 use crate::settings::{Settings, side_name};
-use crate::setup::OpponentKind;
+use crate::setup::{OpponentKind, effort_label};
 use crate::ui::{self, Icon, Logo, Transition};
 
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
@@ -609,6 +632,31 @@ impl Chessdesk {
         Some(div().flex_none().h(shown).overflow_hidden().child(body))
     }
 
+    /// How hard the agent thinks, to change during the game: it applies from its next move.
+    fn render_effort(current: Effort, cx: &mut Context<Self>) -> Div {
+        let settings = Settings::get(cx);
+        let choices = Effort::ALL.into_iter().enumerate().map(|(index, effort)| {
+            ui::button(("effort", index), effort == current, &settings)
+                .flex_1()
+                .justify_center()
+                .h(ui::CONTROL_HEIGHT)
+                .child(effort_label(effort))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_effort(effort, cx)))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .gap_1()
+            .pt_2()
+            .child(
+                div()
+                    .text_color(settings.colors.muted)
+                    .child(tr("reasoning-effort")),
+            )
+            .child(div().flex().gap_1().children(choices))
+    }
+
     /// The opponent's name, with the tokens used so far on hover, and whether they're busy.
     fn render_opponent_title(&self, cx: &mut Context<Self>) -> Div {
         let settings = Settings::get(cx);
@@ -693,6 +741,15 @@ impl Chessdesk {
                     .child(div().text_color(muted).child(tr("agent-instructions")))
                     .child(area.clone())
             });
+        let hint_note = session
+            .shown_suggestion()
+            .and_then(|suggestion| suggestion.note.clone())
+            .map(|note| div().text_color(muted).child(note));
+        let effort = session
+            .live
+            .as_ref()
+            .filter(|live| live.setup.opponent.agent().is_some())
+            .map(|live| Self::render_effort(live.setup.effort, cx));
         let said = div()
             .id("opponent-section")
             .flex()
@@ -709,6 +766,7 @@ impl Chessdesk {
                     .map(|feedback| render_feedback(&feedback, settings)),
             )
             .children(comment.map(|text| render_bubble(text, settings)))
+            .children(hint_note)
             .children(paused.map(|reason| div().text_color(settings.colors.callout).child(reason)));
         let holds = div()
             .flex()
@@ -716,7 +774,8 @@ impl Chessdesk {
             .flex_1()
             .min_h_0()
             .child(said)
-            .children(instructions);
+            .children(instructions)
+            .children(effort);
         let body =
             shared_body(open * (1. - LOG_SHARE), holds).child(measure(&self.log_space.spare));
         (title.into_any_element(), Some(body))
@@ -917,7 +976,7 @@ impl Chessdesk {
         section(&settings).gap_0().child(title).children(body)
     }
 
-    /// The Analyze button: its choices open upwards, from the bottom of the panel.
+    /// The Analyze button: Stockfish or an agent goes over the game.
     fn render_analyze(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
         let session = self.session();
@@ -926,18 +985,48 @@ impl Chessdesk {
                 .w_full()
                 .into_any_element();
         }
-        let open = self.analyze_menu;
-        let button = ui::action_button("analyze", tr("analyze"), &settings)
+        self.render_helper_menu(
+            HelperMenu::Analyze,
+            tr("analyze"),
+            |this, helper, cx| match helper {
+                Helper::Stockfish => this.analyze(cx),
+                Helper::Agent(kind) => this.review_with(kind, cx),
+            },
+            window,
+            cx,
+        )
+    }
+
+    /// A full-width button whose choices, Stockfish and every agent, open upwards from the
+    /// bottom of the panel. `pick` does the work with the one picked.
+    fn render_helper_menu(
+        &self,
+        menu: HelperMenu,
+        label: SharedString,
+        pick: fn(&mut Self, Helper, &mut Context<Self>),
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let settings = Settings::get(cx);
+        let id = menu.id();
+        let open = self.helper_menu == Some(menu);
+        let button = ui::action_button(id, label, &settings)
             .w_full()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                    this.analyze_menu = !open;
+                    this.helper_menu = (!open).then_some(menu);
                     cx.notify();
                 }),
             );
         let list = open.then(|| {
-            let stockfish = ui::list_row("analyze-stockfish", false, &settings)
+            let choose = |helper: Helper| {
+                cx.listener(move |this, _, _, cx| {
+                    this.helper_menu = None;
+                    pick(this, helper, cx);
+                })
+            };
+            let stockfish = ui::list_row((id, 0usize), false, &settings)
                 .gap_1p5()
                 .text_color(settings.colors.text)
                 .child(ui::logo(
@@ -946,15 +1035,12 @@ impl Chessdesk {
                     settings.colors.text,
                 ))
                 .child("Stockfish")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.analyze_menu = false;
-                    this.analyze(cx);
-                }));
+                .on_click(choose(Helper::Stockfish));
             let folder = Settings::adapters_dir().unwrap_or_default();
             // Every agent, greyed out until it's set up, so that they can all be found.
             let agents = AgentKind::ALL.into_iter().enumerate().map(|(index, kind)| {
                 let ready = adapters::readiness(kind, &folder) == Readiness::Ready;
-                let row = ui::list_row(("analyze-agent", index), false, &settings)
+                let row = ui::list_row((id, index + 1), false, &settings)
                     .gap_1p5()
                     .child(
                         div()
@@ -967,26 +1053,24 @@ impl Chessdesk {
                     )
                     .child(kind.name());
                 if ready {
-                    row.text_color(settings.colors.text).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.analyze_menu = false;
-                            this.review_with(kind, cx);
-                        },
-                    ))
+                    row.text_color(settings.colors.text)
+                        .on_click(choose(Helper::Agent(kind)))
                 } else {
                     row.cursor_default().text_color(settings.colors.muted)
                 }
             });
+            let menu = ElementId::NamedChild(Box::new(id.into()), "menu".into());
+            let menu_in = ElementId::NamedChild(Box::new(id.into()), "menu-in".into());
             deferred(
                 anchored().anchor(Corner::BottomLeft).child(
                     div().pb_1().child(ui::rise_in(
-                        "analyze-menu-in",
+                        menu_in,
                         ui::popover(window, &settings)
-                            .id("analyze-menu")
+                            .id(menu)
                             .occlude()
                             .w(self.panel_width - ANALYZE_MENU_INSET)
                             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                this.analyze_menu = false;
+                                this.helper_menu = None;
                                 cx.notify();
                             }))
                             .child(stockfish)
@@ -1027,12 +1111,28 @@ impl Chessdesk {
         if let Some(live) = &session.live {
             let first = if live.paused.is_some() {
                 wide("resume", "continue").on_click(cx.listener(|this, _, _, cx| this.resume(cx)))
+            } else if live.thinking || session.suggesting {
+                // The answer under way is for the position on the board.
+                ui::disabled_button("take-back", tr("take-back"), &settings).w_full()
             } else {
                 wide("take-back", "take-back")
                     .on_click(cx.listener(|this, _, _, cx| this.take_back(cx)))
             };
             // Greyed out rather than gone while it's not your move, so the buttons below stay put.
-            let hint = if session.player_to_move() {
+            // Against an agent, an agent can give the hint too, and say why.
+            let against_agent = live.setup.opponent.agent().is_some();
+            let hint = if session.player_to_move() && against_agent && !session.suggesting {
+                self.render_helper_menu(
+                    HelperMenu::Hint,
+                    tr("hint"),
+                    |this, helper, cx| match helper {
+                        Helper::Stockfish => this.suggest(cx),
+                        Helper::Agent(kind) => this.suggest_with(kind, cx),
+                    },
+                    window,
+                    cx,
+                )
+            } else if session.player_to_move() {
                 suggest("hint", cx)
             } else {
                 ui::disabled_button("suggest", tr("hint"), &settings)

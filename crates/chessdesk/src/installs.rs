@@ -2,6 +2,7 @@
 //! this rather than the settings page that starts the work, so the work carries on, and shows,
 //! after the page closes.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -23,18 +24,57 @@ use crate::ui::{self, Activity};
 const PROGRESS_TICK: Duration = Duration::from_millis(200);
 
 /// An engine that can be fetched.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Engine {
     Stockfish,
     Maia,
 }
 
 impl Engine {
+    const ALL: [Self; 2] = [Self::Stockfish, Self::Maia];
+
     fn name(self) -> &'static str {
         match self {
             Self::Stockfish => "Stockfish",
             Self::Maia => "Maia",
         }
+    }
+
+    /// The program whose release counts: for Maia, `lc0`. Its networks never change.
+    fn program(self) -> &'static str {
+        match self {
+            Self::Stockfish => "stockfish",
+            Self::Maia => "lc0",
+        }
+    }
+
+    fn latest(self) -> Result<String, String> {
+        match self {
+            Self::Stockfish => download::latest_stockfish(),
+            Self::Maia => download::latest_lc0(),
+        }
+    }
+}
+
+/// How an installed engine stands against its latest release.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineRelease {
+    /// Not asked yet, or asking failed.
+    Unknown,
+    Latest(String),
+    /// A newer one is out, or which one is here isn't known: installed by hand, or by a
+    /// Chessdesk before 2.3.0.
+    Newer(String),
+}
+
+/// Where `installed` stands against `latest`.
+fn compare(installed: Option<&str>, latest: Option<&str>) -> EngineRelease {
+    match (installed, latest) {
+        (_, None) => EngineRelease::Unknown,
+        (Some(installed), Some(latest)) if installed == latest => {
+            EngineRelease::Latest(latest.to_owned())
+        }
+        (_, Some(latest)) => EngineRelease::Newer(latest.to_owned()),
     }
 }
 
@@ -74,6 +114,9 @@ pub struct Installs {
     font: Option<(String, Progress)>,
     /// The agent whose adapter is being installed.
     installing: Option<AgentKind>,
+    /// Each engine's latest release, once asked for: once a run is enough.
+    latest_engines: HashMap<Engine, String>,
+    engines_checked: bool,
     app_update: AppUpdate,
 }
 
@@ -109,6 +152,41 @@ impl Installs {
 
     pub fn installing(&self) -> Option<AgentKind> {
         self.installing
+    }
+
+    /// Where the installed `engine` stands against its latest release.
+    pub fn engine_release(&self, engine: Engine) -> EngineRelease {
+        let installed = Settings::engines_dir().and_then(|root| {
+            download::installed_release(&download::engine_folder(&root, engine.program()))
+        });
+        compare(
+            installed.as_deref(),
+            self.latest_engines.get(&engine).map(String::as_str),
+        )
+    }
+
+    /// Asks GitHub for each engine's latest release, once a run, quietly: without an answer
+    /// the update buttons just stay off.
+    pub fn check_engines(&mut self, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.engines_checked, true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async {
+                    Engine::ALL
+                        .into_iter()
+                        .filter_map(|engine| Some((engine, engine.latest().ok()?)))
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.latest_engines.extend(found);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn app_update(&self) -> &AppUpdate {
@@ -430,5 +508,27 @@ fn store(key: &str, value: &str, cx: &mut Context<Installs>) {
         Err(error) => cx.emit(Event::Failed(
             tr_with!("error-save-setting", error = error).to_string(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_update_is_offered_only_for_a_newer_or_unknown_release() {
+        assert_eq!(
+            compare(Some("sf_19"), Some("sf_19")),
+            EngineRelease::Latest("sf_19".to_owned())
+        );
+        assert_eq!(
+            compare(Some("sf_18"), Some("sf_19")),
+            EngineRelease::Newer("sf_19".to_owned())
+        );
+        assert_eq!(
+            compare(None, Some("sf_19")),
+            EngineRelease::Newer("sf_19".to_owned())
+        );
+        assert_eq!(compare(Some("sf_19"), None), EngineRelease::Unknown);
     }
 }

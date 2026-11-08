@@ -42,13 +42,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: windows-latest, arch: x86_64 }
-          - { runner: windows-11-arm, arch: aarch64 }
+          - { runner: windows-latest, arch: x64 }
+          - { runner: windows-11-arm, arch: arm64 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       # ring needs LLVM's clang on ARM64; the one from Visual Studio won't do.
-      - if: matrix.arch == 'aarch64'
+      - if: matrix.arch == 'arm64'
         shell: pwsh
         run: |
           $clang = 'C:\Program Files\LLVM\bin\clang.exe'
@@ -108,8 +108,8 @@ jobs:
       matrix:
         include:
           # The oldest supported Ubuntu, so the binary runs on any glibc since.
-          - { runner: ubuntu-22.04, arch: x86_64 }
-          - { runner: ubuntu-22.04-arm, arch: aarch64 }
+          - { runner: ubuntu-22.04, arch: x64 }
+          - { runner: ubuntu-22.04-arm, arch: arm64 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -157,8 +157,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, arch: x86_64 }
-          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+          - { runner: ubuntu-24.04, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -199,5 +199,11 @@ jobs:
             echo "v$version is out already."
             exit 0
           fi
+          # Under the names before 2.3.0 too, which those versions' updaters look for.
+          for os_ext in windows:zip linux:tar.gz; do
+            os=${os_ext%%:*} ext=${os_ext#*:}
+            cp "chessdesk-$os-x64.$ext" "chessdesk-$os-x86_64.$ext"
+            cp "chessdesk-$os-arm64.$ext" "chessdesk-$os-aarch64.$ext"
+          done
           gh release create "v$version" --target "$GITHUB_SHA" --title "Chessdesk $version" \
             --generate-notes chessdesk-*.zip chessdesk-*.tar.gz

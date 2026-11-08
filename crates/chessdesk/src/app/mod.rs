@@ -145,8 +145,8 @@ pub struct Chessdesk {
     /// The likelihood bars, on their way to the latest numbers.
     likelihood: Motion,
     open_menu: Option<usize>,
-    /// Whether the Analyze button's choices are open.
-    analyze_menu: bool,
+    /// Which button's choices of Stockfish or an agent are open: Analyze's or Hint's.
+    helper_menu: Option<panel::HelperMenu>,
     /// The game whose row was right-clicked, and where.
     context_menu: Option<(Entry, Point<Pixels>)>,
     /// The game waiting for a yes before it's deleted.
@@ -214,7 +214,7 @@ impl Chessdesk {
             dragging: None,
             likelihood: Motion::new(Instant::now()),
             open_menu: None,
-            analyze_menu: false,
+            helper_menu: None,
             context_menu: None,
             confirm_delete: None,
             renaming: None,

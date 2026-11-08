@@ -11,6 +11,7 @@ use chessdesk_players::acp::{AgentConfig, AgentKind, AgentOpponent, Effort};
 use chessdesk_players::adapters::{Readiness, readiness};
 use chessdesk_players::download;
 use chessdesk_players::uci::{Engine, EngineConfig};
+use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use shakmaty::{Chess, Color};
 
@@ -116,6 +117,15 @@ impl OpponentKind {
                 .then(|| tr("maia-missing").to_string()),
         }
     }
+}
+
+/// How an effort shows in the interface.
+pub fn effort_label(effort: Effort) -> SharedString {
+    tr(match effort {
+        Effort::Low => "effort-low",
+        Effort::Medium => "effort-medium",
+        Effort::High => "effort-high",
+    })
 }
 
 /// How a Maia network plays on Lichess, as opposed to the rating it was trained on. The bots

@@ -17,7 +17,7 @@ use crate::installs::{self, Installs, NeedsStockfish};
 use crate::models::{Catalog, Offer};
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
-use crate::setup::{OpponentKind, Setup, Side, maia_strength};
+use crate::setup::{OpponentKind, Setup, Side, effort_label, maia_strength};
 use crate::text_area::TextArea;
 use crate::ui::{self, Logo};
 
@@ -156,14 +156,6 @@ fn budget_label(budget: Option<u64>) -> SharedString {
         || tr("no-limit"),
         |tokens| tr_with!("budget-tokens", tokens = thousands(tokens)),
     )
-}
-
-fn effort_label(effort: Effort) -> SharedString {
-    tr(match effort {
-        Effort::Low => "effort-low",
-        Effort::Medium => "effort-medium",
-        Effort::High => "effort-high",
-    })
 }
 
 fn thousands(value: u64) -> String {

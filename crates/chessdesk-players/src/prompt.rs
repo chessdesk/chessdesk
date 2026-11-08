@@ -28,6 +28,10 @@ const REVIEW: &str = "You're a friendly coach going over a game with the player,
                       d5? Happens to everyone.} [%cal Gd5f6] [%csl Rf6]. Cover every listed \
                       move. No other text.";
 
+const HINT: &str = "You're a friendly chess coach. The player is stuck and asks for a hint: \
+                    the best move for them in the position given. Reply with only that move \
+                    in SAN, then a {comment} of one or two casual sentences on why it's good.";
+
 /// The system prompt for a game. It replaces the agent's own, which is what keeps a
 /// session this small: Claude's default costs about 28,000 tokens.
 pub fn system(annotate: bool, language: Option<&str>) -> String {
@@ -37,6 +41,21 @@ pub fn system(annotate: bool, language: Option<&str>) -> String {
         prompt.push_str(&comments_in(language));
     }
     prompt
+}
+
+pub fn hint_system(language: Option<&str>) -> String {
+    format!("{HINT}{}", comments_in(language))
+}
+
+/// Asks for a hint for whoever is to move in `position`.
+pub fn hint(position: &Chess) -> String {
+    let side = if position.turn().is_white() {
+        "White"
+    } else {
+        "Black"
+    };
+    let fen = shakmaty::fen::Fen::from_position(position, shakmaty::EnPassantMode::Legal);
+    format!("I'm {side}.\nFEN {fen}")
 }
 
 pub fn review_system(language: Option<&str>) -> String {
@@ -165,6 +184,16 @@ mod tests {
         // Without comments or in English, it costs nothing.
         assert_eq!(system(false, Some("Deutsch")), PLAY);
         assert_eq!(review_system(None), REVIEW);
+    }
+
+    #[test]
+    fn a_hint_is_asked_for_the_side_to_move() {
+        let position = after(&["e4"]).position();
+        assert_eq!(
+            hint(&position),
+            "I'm Black.\nFEN rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        );
+        assert!(hint_system(Some("Deutsch")).ends_with(" Write the comments in Deutsch."));
     }
 
     #[test]

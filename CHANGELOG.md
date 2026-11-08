@@ -3,6 +3,27 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.3.0 - 2026-11-08
+
+### Added
+
+- Reasoning effort can be changed during a game against an agent, from its next move on
+- Agents get a time limit for each move: 3 minutes on low effort, 8 on medium and 20 on high. One
+  that runs over pauses the game and says so in the error bar
+- In games against an agent, Hint offers Stockfish or any agent, as Analyze does. An agent's hint
+  says why
+
+### Changed
+
+- Release builds are named `arm64` and `x64` instead of `aarch64` and `x86_64`. Releases carry the
+  old names too, so older versions still find their update
+- An engine's Update button is on only when a newer release is out, which its row names
+- Take back is greyed out while the opponent or a hint is thinking
+
+### Fixed
+
+- The screenshots in the README showed a sliver of desktop at the window's sides
+
 ## 2.2.0 - 2026-11-08
 
 ### Added

@@ -5,8 +5,9 @@
 //! tools, no project and no settings, and every permission request is refused.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc as std_mpsc};
 use std::thread;
+use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::ConnectionTo;
@@ -20,7 +21,7 @@ use agent_client_protocol::v1::schema::{
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use chessdesk_core::{Annotations, Game};
 use futures::StreamExt;
-use futures::channel::{mpsc, oneshot};
+use futures::channel::mpsc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use shakmaty::{Color, Position};
@@ -38,6 +39,16 @@ pub enum Effort {
 
 impl Effort {
     pub const ALL: [Self; 3] = [Self::Low, Self::Medium, Self::High];
+
+    /// How long a reply may take before it's given up on. Thinking hard takes long: on high
+    /// effort, minutes for one move are normal.
+    pub fn answer_within(self) -> Duration {
+        match self {
+            Self::Low => Duration::from_mins(3),
+            Self::Medium => Duration::from_mins(8),
+            Self::High => Duration::from_mins(20),
+        }
+    }
 
     /// The word every agent uses for it.
     fn level(self) -> &'static str {
@@ -154,36 +165,48 @@ type Answer = Result<(String, Option<Tokens>), PlayerError>;
 /// One prompt, and where its answer goes.
 struct Ask {
     text: String,
-    answer: oneshot::Sender<Answer>,
+    answer: std_mpsc::SyncSender<Answer>,
 }
 
 /// A live session with an agent. Dropping it ends the session and the agent.
 pub struct Session {
     asks: mpsc::UnboundedSender<Ask>,
+    /// How long a reply may take.
+    limit: Duration,
 }
 
 impl Session {
     /// Starts the agent, with `system` replacing its own system prompt.
     pub fn start(config: &AgentConfig, system: String) -> Self {
         let (asks, incoming) = mpsc::unbounded();
-        let config = config.clone();
+        let thread_config = config.clone();
         thread::spawn(move || {
             // Failures reach callers as a closed channel, and through the answer below.
-            if let Err(error) = futures::executor::block_on(run(config, system, incoming)) {
+            if let Err(error) = futures::executor::block_on(run(thread_config, system, incoming)) {
                 eprintln!("agent session ended: {error}");
             }
         });
-        Self { asks }
+        Self {
+            asks,
+            limit: config.effort.answer_within(),
+        }
     }
 
-    /// Sends a prompt and waits for the whole reply.
+    /// Sends a prompt and waits for the whole reply, as long as the effort allows. A session
+    /// that ran out of time is still busy with that prompt: start a new one.
     pub fn ask(&self, text: String) -> Answer {
-        let (answer, reply) = oneshot::channel();
+        let (answer, reply) = std_mpsc::sync_channel(1);
         self.asks
             .unbounded_send(Ask { text, answer })
             .map_err(|_| PlayerError::Process("the agent is not running".to_owned()))?;
-        futures::executor::block_on(reply)
-            .map_err(|_| PlayerError::Process("the agent stopped".to_owned()))?
+        reply
+            .recv_timeout(self.limit)
+            .map_err(|error| match error {
+                std_mpsc::RecvTimeoutError::Timeout => PlayerError::TimedOut(self.limit),
+                std_mpsc::RecvTimeoutError::Disconnected => {
+                    PlayerError::Process("the agent stopped".to_owned())
+                }
+            })?
     }
 }
 
@@ -491,6 +514,33 @@ fn add_tokens(total: &mut Option<Tokens>, more: Option<Tokens>) {
     }
 }
 
+/// Reads a move from the session's reply to `text`, and if there's none, asks once more with
+/// the legal moves listed.
+fn ask_for_move(
+    session: &Session,
+    text: String,
+    position: &shakmaty::Chess,
+) -> Result<Decision, PlayerError> {
+    let (first, mut tokens) = session.ask(text)?;
+    if let Some((played, annotations)) = reply::parse(&first, position) {
+        return Ok(Decision {
+            played,
+            annotations,
+            tokens,
+        });
+    }
+    let (second, more) = session.ask(prompt::retry(position))?;
+    add_tokens(&mut tokens, more);
+    match reply::parse(&second, position) {
+        Some((played, annotations)) => Ok(Decision {
+            played,
+            annotations,
+            tokens,
+        }),
+        None => Err(PlayerError::NoLegalMove { reply: second }),
+    }
+}
+
 impl Opponent for AgentOpponent {
     fn next_move(&mut self, game: &Game, instructions: &str) -> Result<Decision, PlayerError> {
         let position = game.position();
@@ -513,26 +563,18 @@ impl Opponent for AgentOpponent {
         let instructions = instructions.trim();
         let text = prompt::with_instructions(text, instructions, &self.told);
         instructions.clone_into(&mut self.told);
-        let (first, mut tokens) = self.session.ask(text)?;
-        if let Some((played, annotations)) = reply::parse(&first, &position) {
-            return Ok(Decision {
-                played,
-                annotations,
-                tokens,
-            });
-        }
-
-        let (second, more) = self.session.ask(prompt::retry(&position))?;
-        add_tokens(&mut tokens, more);
-        match reply::parse(&second, &position) {
-            Some((played, annotations)) => Ok(Decision {
-                played,
-                annotations,
-                tokens,
-            }),
-            None => Err(PlayerError::NoLegalMove { reply: second }),
-        }
+        ask_for_move(&self.session, text, &position)
     }
+}
+
+/// Has an agent suggest a move for whoever is to move in `position`, with why, in a session
+/// of its own: the move to play, its comment, and the tokens spent.
+pub fn hint(config: &AgentConfig, position: &shakmaty::Chess) -> Result<Decision, PlayerError> {
+    let session = Session::start(
+        config,
+        prompt::hint_system(config.reply_language.as_deref()),
+    );
+    ask_for_move(&session, prompt::hint(position), position)
 }
 
 /// Has an agent comment on a game in one call, and returns the comments added and the

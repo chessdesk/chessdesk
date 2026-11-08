@@ -11,7 +11,7 @@ use gpui::{
 
 use crate::audio;
 use crate::i18n::{self, tr, tr_with};
-use crate::installs::{AppUpdate, Engine, Installs};
+use crate::installs::{AppUpdate, Engine, EngineRelease, Installs};
 use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
 use crate::setup::{OpponentKind, title_case};
 use crate::ui::{self, Logo};
@@ -420,13 +420,22 @@ impl SettingsView {
         let settings = Settings::get(cx);
         let missing = kind.missing(&settings);
         let downloading = self.installs.read(cx).downloading();
-        let hint: SharedString = match (&downloading, &missing) {
-            (Some((fetching, done)), _) if *fetching == engine => {
+        let release = self.installs.read(cx).engine_release(engine);
+        let hint: SharedString = match (&downloading, &missing, &release) {
+            (Some((fetching, done)), ..) if *fetching == engine => {
                 tr_with!("downloading", percent = (done * 100.).round() as u32)
             }
-            (_, Some(missing)) => missing.clone().into(),
-            (_, None) => tr("installed"),
+            (_, Some(missing), _) => missing.clone().into(),
+            (_, None, EngineRelease::Latest(version)) => {
+                tr_with!("engine-latest", version = version.as_str())
+            }
+            (_, None, EngineRelease::Newer(version)) => {
+                tr_with!("engine-newer", version = version.as_str())
+            }
+            (_, None, EngineRelease::Unknown) => tr("installed"),
         };
+        // Updating fetches the latest again: only worth it when that's another one.
+        let wanted = missing.is_some() || matches!(release, EngineRelease::Newer(_));
         let busy = downloading.is_some();
         let (id, key) = match engine {
             Engine::Stockfish => ("download-stockfish", "stockfish"),
@@ -440,7 +449,7 @@ impl SettingsView {
         let fetching = downloading.is_some_and(|(fetching, _)| fetching == engine);
         let download = if fetching {
             ui::busy_button(id, label.clone(), &settings).into_any_element()
-        } else if can_download && !busy {
+        } else if can_download && !busy && wanted {
             ui::action_button(id, label.clone(), &settings)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.installs
@@ -670,6 +679,13 @@ impl SettingsView {
         ]
     }
 
+    /// What a page needs to know when it opens: the engines' latest releases.
+    fn on_page_shown(&self, cx: &mut Context<Self>) {
+        if self.page == SettingsPage::Engines {
+            self.installs.update(cx, Installs::check_engines);
+        }
+    }
+
     /// The pages, for the sidebar's place.
     pub fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let settings = Settings::get(cx);
@@ -682,6 +698,7 @@ impl SettingsView {
                     .child(page.title())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.page = page;
+                        this.on_page_shown(cx);
                         cx.notify();
                     }))
             });
@@ -813,12 +830,14 @@ impl SettingsView {
 pub fn page(page: SettingsPage, installs: Entity<Installs>, cx: &mut App) -> Entity<SettingsView> {
     cx.new(|cx| {
         let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
-        SettingsView {
+        let view = SettingsView {
             page,
             open_select: None,
             installs,
             _redraw: redraw,
-        }
+        };
+        view.on_page_shown(cx);
+        view
     })
 }
 

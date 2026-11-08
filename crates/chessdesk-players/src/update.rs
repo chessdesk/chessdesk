@@ -33,11 +33,17 @@ struct Latest {
     assets: Vec<Asset>,
 }
 
-/// The archive the release workflow builds for this operating system and CPU.
+/// The archive the release workflow builds for this operating system and CPU. Releases name
+/// CPUs as people know them, `arm64` and `x64`, not as Rust does.
 fn asset_name(os: &str, arch: &str) -> Option<String> {
+    let cpu = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => return None,
+    };
     match os {
-        "windows" => Some(format!("chessdesk-windows-{arch}.zip")),
-        "linux" => Some(format!("chessdesk-linux-{arch}.tar.gz")),
+        "windows" => Some(format!("chessdesk-windows-{cpu}.zip")),
+        "linux" => Some(format!("chessdesk-linux-{cpu}.tar.gz")),
         "macos" => Some("chessdesk-macos.zip".to_owned()),
         _ => None,
     }
@@ -144,9 +150,9 @@ mod tests {
     const LATEST: &str = r#"{"tag_name":"v1.9.0",
         "html_url":"https://github.com/chessdesk/chessdesk/releases/tag/v1.9.0",
         "assets":[
-            {"name":"chessdesk-linux-x86_64.tar.gz","browser_download_url":"https://example.com/l"},
+            {"name":"chessdesk-linux-x64.tar.gz","browser_download_url":"https://example.com/l"},
             {"name":"chessdesk-macos.zip","browser_download_url":"https://example.com/m"},
-            {"name":"chessdesk-windows-aarch64.zip","browser_download_url":"https://example.com/w"}
+            {"name":"chessdesk-windows-arm64.zip","browser_download_url":"https://example.com/w"}
         ]}"#;
 
     #[test]
@@ -155,7 +161,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(release.version, Version::new(1, 9, 0));
-        assert_eq!(release.asset.name, "chessdesk-windows-aarch64.zip");
+        assert_eq!(release.asset.name, "chessdesk-windows-arm64.zip");
         assert!(release.page.ends_with("/v1.9.0"));
         let mac = newer(LATEST, "1.8.0", "macos", "x86_64").unwrap().unwrap();
         assert_eq!(mac.asset.name, "chessdesk-macos.zip");
