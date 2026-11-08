@@ -83,6 +83,7 @@ and `board_dark` are optional; other keys are ignored. The
 | [`green-board`](../plugins/green-board) | A green board, its texture made for Chessdesk | GPL 3.0 or later |
 | [`marble-board`](../plugins/marble-board) | Lichess's blue-marble board | AGPL 3.0 or later |
 | [`newspaper-board`](../plugins/newspaper-board) | Lichess's newspaper board, hatched like a printed diagram | AGPL 3.0 or later |
+| [`canvas-board`](../plugins/canvas-board), [`maple-board`](../plugins/maple-board) | Lichess's canvas2 and maple2 boards | AGPL 3.0 or later |
 | [`wood-sounds`](../plugins/wood-sounds) | Real wood knocks from [Kenney](https://kenney.nl/assets/impact-sounds) (CC0), and a marimba made for Chessdesk | GPL 3.0 or later |
 | [`soft-sounds`](../plugins/soft-sounds) | Soft taps and a marimba, made for Chessdesk | GPL 3.0 or later |
 | [`lang-de`](../plugins/lang-de), [`lang-es`](../plugins/lang-es), [`lang-fr`](../plugins/lang-fr), [`lang-hi`](../plugins/lang-hi), [`lang-zh`](../plugins/lang-zh) | German, Spanish, French, Hindi and Simplified Chinese; Hindi and Chinese download a Noto font (OFL) when picked | GPL 3.0 or later |
