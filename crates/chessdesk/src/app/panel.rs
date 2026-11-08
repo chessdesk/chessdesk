@@ -62,6 +62,8 @@ const NUMBER_WIDTH: Pixels = px(30.);
 const ANALYZE_MENU_INSET: Pixels = px(24.);
 /// How faint the logo of an agent that isn't set up is, beside its greyed-out name.
 const UNAVAILABLE_OPACITY: f32 = 0.4;
+/// The effort select, narrower than a dialog's: the panel has less room.
+const EFFORT_SELECT_WIDTH: Pixels = px(120.);
 /// How long a section of the game panel takes to fold or open.
 const FOLD: Duration = Duration::from_millis(200);
 /// How much of the room the opponent's section and the moves share the moves may take, at
@@ -529,7 +531,7 @@ impl Chessdesk {
         };
 
         let mut column = div().flex().flex_col().h_full().w(self.panel_width);
-        let (opponent_title, opponent_body) = self.render_opponent(opponent, cx);
+        let (opponent_title, opponent_body) = self.render_opponent(opponent, window, cx);
         column = column.child(opponent_title).children(opponent_body);
         if let Some(likelihood) = self.render_likelihood(window, cx) {
             column = column.child(line()).child(likelihood);
@@ -632,29 +634,58 @@ impl Chessdesk {
         Some(div().flex_none().h(shown).overflow_hidden().child(body))
     }
 
-    /// How hard the agent thinks, to change during the game: it applies from its next move.
-    fn render_effort(current: Effort, cx: &mut Context<Self>) -> Div {
+    /// How hard the agent thinks, to change during the game: a select beside its label. It
+    /// applies from the agent's next move.
+    fn render_effort(&self, current: Effort, window: &Window, cx: &mut Context<Self>) -> Div {
         let settings = Settings::get(cx);
-        let choices = Effort::ALL.into_iter().enumerate().map(|(index, effort)| {
-            ui::button(("effort", index), effort == current, &settings)
-                .flex_1()
-                .justify_center()
-                .h(ui::CONTROL_HEIGHT)
-                .child(effort_label(effort))
-                .on_click(cx.listener(move |this, _, _, cx| this.set_effort(effort, cx)))
+        let open = self.effort_menu;
+        let button = ui::select_button("effort", effort_label(current), None, open, &settings)
+            .w(EFFORT_SELECT_WIDTH)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    this.effort_menu = !open;
+                    cx.notify();
+                }),
+            );
+        let list = open.then(|| {
+            let rows = Effort::ALL.into_iter().enumerate().map(|(index, effort)| {
+                ui::list_row(("effort-choice", index), effort == current, &settings)
+                    .text_color(settings.colors.text)
+                    .child(effort_label(effort))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.effort_menu = false;
+                        this.set_effort(effort, cx);
+                        cx.notify();
+                    }))
+            });
+            ui::select_dropdown(
+                ui::popover(window, &settings)
+                    .id("effort-list")
+                    .occlude()
+                    .w(EFFORT_SELECT_WIDTH)
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                        this.effort_menu = false;
+                        cx.notify();
+                    }))
+                    .children(rows),
+            )
         });
         div()
             .flex()
-            .flex_col()
             .flex_none()
-            .gap_1()
+            .items_center()
+            .justify_between()
+            .gap_2()
             .pt_2()
             .child(
                 div()
+                    .min_w_0()
+                    .truncate()
                     .text_color(settings.colors.muted)
                     .child(tr("reasoning-effort")),
             )
-            .child(div().flex().gap_1().children(choices))
+            .child(div().flex_none().child(button).children(list))
     }
 
     /// The opponent's name, with the tokens used so far on hover, and whether they're busy.
@@ -698,7 +729,12 @@ impl Chessdesk {
 
     /// Who you're playing, whether they're thinking, and what they said about the move: the
     /// title row, and below it what takes as much of the room left over as it's `open`.
-    fn render_opponent(&self, open: f32, cx: &mut Context<Self>) -> (AnyElement, Option<Div>) {
+    fn render_opponent(
+        &self,
+        open: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (AnyElement, Option<Div>) {
         let settings = Settings::get(cx);
         let settings = &settings;
         let session = self.session();
@@ -749,7 +785,7 @@ impl Chessdesk {
             .live
             .as_ref()
             .filter(|live| live.setup.opponent.agent().is_some())
-            .map(|live| Self::render_effort(live.setup.effort, cx));
+            .map(|live| self.render_effort(live.setup.effort, window, cx));
         let said = div()
             .id("opponent-section")
             .flex()

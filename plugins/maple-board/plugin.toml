@@ -1,0 +1,12 @@
+# The board Lichess calls maple2, by the lila authors and pirouetti, AGPLv3+:
+# https://github.com/lichess-org/lila/tree/master/public/images/board
+name = "maple-board"
+version = "1.0.0"
+description = "Flamed maple and cherry, a warm inlaid wooden board"
+license = "AGPL-3.0-or-later"
+
+[[boards]]
+name = "Maple"
+image = "board.jpg"
+light = "#e0c59e"
+dark = "#ac765c"

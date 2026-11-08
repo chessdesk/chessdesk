@@ -3,6 +3,17 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.4.0 - 2026-11-08
+
+### Added
+
+- Two boards from Lichess: Canvas, woven cloth in slate blue and grey, and Maple, flamed maple and
+  cherry
+
+### Changed
+
+- The reasoning effort in the game panel is a select beside its label, instead of three buttons
+
 ## 2.3.0 - 2026-11-08
 
 ### Added

@@ -74,6 +74,10 @@ const FILES: &[(&str, &[u8])] = bundle!(
     "marble-board/board.jpg",
     "newspaper-board/plugin.toml",
     "newspaper-board/board.png",
+    "canvas-board/plugin.toml",
+    "canvas-board/board.jpg",
+    "maple-board/plugin.toml",
+    "maple-board/board.jpg",
     "wood-sounds/plugin.toml",
     "wood-sounds/sounds/move.ogg",
     "wood-sounds/sounds/capture.ogg",
@@ -230,7 +234,10 @@ mod tests {
             .iter()
             .map(|board| board.name.as_str())
             .collect();
-        assert_eq!(boards, ["Green", "Marble", "Newspaper", "Wood"]);
+        assert_eq!(
+            boards,
+            ["Canvas", "Green", "Maple", "Marble", "Newspaper", "Wood"]
+        );
         let packs: Vec<_> = plugins.sound_packs.iter().map(|pack| &pack.name).collect();
         assert_eq!(packs, ["Soft", "Wood"]);
         let languages: Vec<_> = plugins.languages.iter().map(|known| &known.name).collect();
