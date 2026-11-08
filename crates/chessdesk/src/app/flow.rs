@@ -19,7 +19,7 @@ use shakmaty::{Color, KnownOutcome, Move, Outcome, Position, Role, Square};
 
 use super::Chessdesk;
 use super::clock::Clock;
-use super::session::{HintNote, INTRO_TAG, Live, Promotion, Session, SessionId, Suggestion};
+use super::session::{HintNote, INTRO_TAG, Live, Pause, Promotion, Session, SessionId, Suggestion};
 use crate::audio;
 use crate::board::{SLIDE_TIME, Slide, slide_paths, slide_pieces};
 use crate::i18n::{self, tr, tr_with};
@@ -55,7 +55,14 @@ fn ending_sound(game: &Game) -> Option<Sound> {
     }
 }
 
-/// Gives the player's move that led to `ply` its verdict, in tutoring against an engine.
+/// Stops turns waiting for Stockfish's verdicts, which won't come.
+fn stockfish_failed(session: &mut Session) {
+    if let Some(live) = &mut session.live {
+        live.stockfish_failed = true;
+    }
+}
+
+/// Gives the player's move that led to `ply` its verdict, in tutoring.
 fn grade(session: &mut Session, ply: usize) {
     let Some(live) = session
         .live
@@ -175,6 +182,7 @@ impl Chessdesk {
             evaluating: false,
             instructions: None,
             introduced: false,
+            stockfish_failed: false,
             setup,
         });
         // The empty board from before any game has served its purpose.
@@ -305,9 +313,16 @@ impl Chessdesk {
     // The opponent's turn.
 
     fn ask_opponent(&mut self, id: SessionId, cx: &mut Context<Self>) {
+        let stockfish = OpponentKind::Stockfish
+            .missing(&Settings::get(cx))
+            .is_none();
         let Some(session) = self.session_mut(id) else {
             return;
         };
+        // Asked again once Stockfish has given it, from `on_live_eval`.
+        if session.awaits_verdict(stockfish) {
+            return;
+        }
         let position = session.game.position();
         let tokens = session.tokens;
         let game = session.game.clone();
@@ -334,7 +349,7 @@ impl Chessdesk {
         if let (Some(budget), Some(tokens)) = (live.setup.token_budget, tokens)
             && tokens.total >= budget
         {
-            live.paused = Some(tr_with!("budget-used", budget = budget));
+            live.paused = Some(Pause::Notice(tr_with!("budget-used", budget = budget)));
             cx.notify();
             return;
         }
@@ -491,12 +506,14 @@ impl Chessdesk {
                     minutes = limit.as_secs() / 60,
                     effort = effort_label(live.setup.effort).to_string()
                 );
-                live.paused = Some(reason.clone());
+                live.paused = Some(Pause::Failed);
                 self.report(reason, cx);
             }
             Err(error) => {
-                live.paused = Some(error.to_string().into());
-                cx.notify();
+                // Such as the provider turning the agent away: an error like any other.
+                live.paused = Some(Pause::Failed);
+                let agent = live.setup.opponent.name();
+                self.report(format!("{agent}: {error}"), cx);
             }
         }
     }
@@ -802,9 +819,23 @@ impl Chessdesk {
                 if eval.wdl.is_some() {
                     self.autosave(id, cx);
                     self.evaluate_live(id, cx);
+                } else {
+                    stockfish_failed(session);
                 }
             }
-            Err(error) => self.report(format!("Stockfish: {error}"), cx),
+            Err(error) => {
+                if let Some(session) = self.session_mut(id) {
+                    stockfish_failed(session);
+                }
+                self.report(format!("Stockfish: {error}"), cx);
+            }
+        }
+        // A coaching agent may have been waiting for this verdict, or for Stockfish to fail.
+        let latest = self
+            .session_mut(id)
+            .is_some_and(|session| ply > 0 && ply == session.game.moves().len());
+        if latest {
+            self.ask_opponent(id, cx);
         }
         cx.notify();
     }
@@ -1200,6 +1231,7 @@ impl Chessdesk {
                 evaluating: false,
                 instructions: None,
                 introduced: false,
+                stockfish_failed: false,
                 setup: meta.setup,
             });
         }

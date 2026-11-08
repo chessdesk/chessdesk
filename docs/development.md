@@ -77,3 +77,29 @@ cargo build -p chessdesk-players --example fake_uci   # then point `stockfish` a
 cargo run -p chessdesk-players --example agent_smoke -- claude haiku
 cargo run -p chessdesk-players --example agent_models   # the models each agent offers, no tokens
 ```
+
+A whole tutoring game, headless: Stockfish at a set engine Elo plays White for you, its moves graded
+as the app grades yours, and the agent coaches as Black. It prints each move with its comment and
+tokens, and saves `agent-game.pgn` in the temp folder. A game costs about 150,000 tokens with Sonnet,
+mostly cached:
+
+```powershell
+$env:STOCKFISH = "$env:LOCALAPPDATA\chessdesk\engines\stockfish\stockfish\stockfish-windows-arm64-universal.exe"
+cargo run -p chessdesk-players --example agent_game -- claude sonnet low 1320 "I'm a new player"
+cargo run -p chessdesk-players --example agent_game -- copilot "" low 1320 "I'm a new player"
+```
+
+The lesson test is the sharpest check of the harness: a new player asks "teach me a super fun,
+fast way to mate" and plays exactly the move the agent marks with `[%next]`. Each run is judged on
+five checks (the intro names the first move, every move is named, the player gives mate, comments
+read whole, Stockfish isn't named), and the last argument is the number of runs. It exits with 1 on
+any failure, and costs a few thousand tokens a run:
+
+```powershell
+cargo run -p chessdesk-players --example agent_lesson -- claude opus low 3
+cargo run -p chessdesk-players --example agent_lesson -- pi openrouter/z-ai/glm-5.3-flash low 3
+```
+
+Results on 2026-11-08: Opus 5.5 on low passed every check in 3 of 3 runs, mating in 4 moves for
+about 8,500 tokens; GLM 5.3 Flash on low passed 2 of 3, failing when it named the move in words
+only.

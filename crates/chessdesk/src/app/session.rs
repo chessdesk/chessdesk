@@ -46,7 +46,7 @@ pub struct Live {
     pub plan_version: u64,
     pub thinking: bool,
     /// Why the game stopped, until the player goes on.
-    pub paused: Option<SharedString>,
+    pub paused: Option<Pause>,
     pub clock: Option<Clock>,
     /// Whether the player has heard that their time is running out.
     pub low_time_warned: bool,
@@ -58,6 +58,27 @@ pub struct Live {
     /// Whether the opponent has been asked to speak before the player's first move, so that
     /// one that didn't isn't asked again and again.
     pub introduced: bool,
+    /// Whether Stockfish failed in this game, so that no turn waits for its verdict.
+    pub stockfish_failed: bool,
+}
+
+/// Why a game stopped until the player goes on.
+#[derive(Clone)]
+pub enum Pause {
+    /// Something about the game, said beside it: its token budget is spent.
+    Notice(SharedString),
+    /// The opponent failed. What went wrong is in the error bar, with the other errors.
+    Failed,
+}
+
+impl Pause {
+    /// What to say beside the game, if anything.
+    pub fn notice(&self) -> Option<SharedString> {
+        match self {
+            Self::Notice(text) => Some(text.clone()),
+            Self::Failed => None,
+        }
+    }
 }
 
 /// A promotion waiting for its piece.
@@ -301,6 +322,21 @@ impl Session {
         (tutored && unknown && self.game.outcome() == Outcome::Unknown).then_some(latest)
     }
 
+    /// Whether a coaching agent's turn waits for Stockfish's verdict on the player's move,
+    /// which it goes by. The wait is one live evaluation, a fraction of a second.
+    /// `stockfish` says whether it's there to give one.
+    pub fn awaits_verdict(&self, stockfish: bool) -> bool {
+        let (Some(live), Some(last)) = (&self.live, self.game.moves().last()) else {
+            return false;
+        };
+        stockfish
+            && !live.stockfish_failed
+            && live.setup.grades_moves()
+            && live.setup.opponent.agent().is_some()
+            && self.game.position().turn() != live.player
+            && last.eval.wdl.is_none()
+    }
+
     /// Whether Stockfish has work during this game.
     pub fn wants_evaluations(&self) -> bool {
         self.live
@@ -313,7 +349,7 @@ impl Session {
         let live = self
             .live
             .as_ref()
-            .filter(|live| live.setup.grades_moves())?;
+            .filter(|live| live.setup.stockfish_coaches())?;
         let moves = self.game.moves();
         let first_is_players = self.game.start().turn() == live.player;
         let mine = usize::from(!first_is_players);

@@ -279,10 +279,16 @@ impl Setup {
         self.mode != Mode::Competition
     }
 
-    /// Whether the player's moves get a verdict from Stockfish: tutoring without an agent
-    /// to do the talking.
+    /// Whether the player's moves get a verdict from Stockfish: in tutoring, where the
+    /// verdict goes to the player, or to the agent coaching them so that it judges by it.
     pub fn grades_moves(&self) -> bool {
-        self.tutoring() && self.opponent.agent().is_none()
+        self.tutoring()
+    }
+
+    /// Whether Stockfish does the coaching itself, on a card of its own: tutoring without
+    /// an agent to do the talking.
+    pub fn stockfish_coaches(&self) -> bool {
+        self.grades_moves() && self.opponent.agent().is_none()
     }
 
     /// Whether the opponent coaches the player, or Stockfish grades their moves.
@@ -460,6 +466,20 @@ mod tests {
         setup.set_mode(Mode::Casual);
         assert!(setup.grades_moves());
         assert!(setup.shows_likelihood());
+    }
+
+    #[test]
+    fn stockfish_grades_every_tutoring_game_but_coaches_only_without_an_agent() {
+        let against = |opponent| Setup {
+            opponent,
+            ..Setup::default()
+        };
+        let agent = against(OpponentKind::OpenCode);
+        assert!(agent.grades_moves());
+        assert!(!agent.stockfish_coaches());
+        let engine = against(OpponentKind::Maia);
+        assert!(engine.grades_moves());
+        assert!(engine.stockfish_coaches());
     }
 
     #[test]

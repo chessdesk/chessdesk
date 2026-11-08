@@ -33,14 +33,44 @@ adapter: `agent_smoke` prints tokens per turn.
 
 Agents that don't advertise replacing the system prompt get Chessdesk's rules in the first message
 instead, and keep their own prompt, as Copilot does. Copilot's usage is a running total where Claude's
-is per turn. `AgentKind::reports_running_total` accounts for that. Codex, OpenCode and Pi are not
-measured yet; they bring their own prompts and tools, so expect far more than Claude.
+is per turn. `AgentKind::reports_running_total` accounts for that. Codex is not measured yet; it
+brings its own prompt and tools, so expect far more than Claude.
+
+Pi's adapter, `pi-acp`, starts `pi` with fixed arguments and takes no prompt over ACP, so by default
+Pi plays with its coding prompt, its tools (bash, edit, sub-agents, `codemode`), the user's
+`AGENTS.md`, extensions and MCP servers, and runs tools without asking. The adapter reads the
+program from `PI_ACP_PI_COMMAND`, so Chessdesk writes a launcher next to the agent folder that starts
+`pi --no-tools --no-extensions --no-mcp --no-skills --no-context-files --no-prompt-templates
+--system-prompt <file>` (`pi.rs`). Its thinking level is an ACP setting in the `thought_level`
+category, which Chessdesk sets to the effort for any agent that offers it. Measured on 2026-11-08
+with DeepSeek V4.1 Flash on low: Pi's own part of the prompt is the working folder, 140
+characters. The first turns took 700 to 800 tokens; 26 turns took 125,000, mostly reasoning, for
+$0.036. `pi-acp` reports no usage over ACP, so games show tokens as not reported. On one turn the
+model thought for 5,300 tokens and wrote no answer, so an empty reply gets the retry too.
+
+OpenCode doesn't replace its prompt over ACP either, but takes a config in `OPENCODE_CONFIG_CONTENT`:
+Chessdesk defines an agent there with its own prompt and every permission denied, which drops all
+tools, disables the title agent, and sets `OPENCODE_DISABLE_CLAUDE_CODE`, without which OpenCode
+reads `~/.claude/CLAUDE.md` and Claude skills into the prompt. OpenCode's defaults also let its
+tools run without a permission request, so refusing requests did nothing. Measured on 2026-11-08
+with OpenCode 1.19.4 against a local endpoint that logs requests, per request:
+
+| Setup | System prompt | Tools | About |
+|---|---|---|---|
+| Defaults (`build` agent) | 30,104 characters | 10 | 13,000 tokens |
+| Own agent, permissions denied | 5,422 characters | 0 | 1,450 tokens |
+| Also `OPENCODE_DISABLE_CLAUDE_CODE` (what Chessdesk sends) | 355 characters, plus Chessdesk's prompt | 0 | 160 tokens |
 
 Tutoring adds about 100 to 300 tokens per turn: three turns took 937, 1,106 and 1,368 with feedback
-on each move. Comments hint at ideas and give the player's next move away only when the
+on each move. In tutoring, a turn also carries Stockfish's verdict on the player's move, as
+`Stockfish: a mistake, better was g4.`, and the agent is asked only once that's in: one live
+evaluation, 150 ms. Judging the player's moves by itself, a model praised blunders and found
+threats that weren't there. Comments hint at ideas and give the player's next move away only when the
 instructions ask to be taught a line or told what to play: spoiling it is the player's call. Then
-the agent names that one move as `[%next SAN]` and Chessdesk draws its arrow, if it's legal for the
-player. Left to draw it themselves, models marked their own move instead, or the whole plan at once.
+the agent names that one move as `[%next SAN]` and Chessdesk draws its arrow in blue, as a hint's,
+if it's legal for the player. Left to draw it themselves, models marked their own move instead, or
+the whole plan at once; drawn green, it was one arrow among the agent's own ideas, and the lesson
+test's learner followed the wrong one.
 
 Reviewing a game of 8 half-moves with `sonnet` took 1,561 tokens in one call. Longer games cost
 more: the whole PGN goes in, and a comment comes back for each of the player's moves.
@@ -69,13 +99,21 @@ of the network's name. It's a rough fit to a few reports, not a measurement.
 
 - All chess logic is local: legality, game end, analysis, likelihood.
 - One session per game, so that the provider's prompt cache serves everything said so far.
-- A turn is the last move and the FEN. The FEN keeps takebacks right without a new session.
+- A turn is the last move, where every piece stands, and the FEN. The FEN keeps takebacks right
+  without a new session. The piece list, about 60 tokens, is there because models read the FEN
+  badly: every blunder traced in the 2.6.0 games came from a piece the model had lost track of, a
+  rook on an open file or a guarded square, and Opus on low announced a fork that wasn't one.
+- A lesson the player asks for is theirs to play: the agent names their next move each turn as
+  `[%next SAN]`, and plays the replies that let it work. Asked to teach a fast mate, GLM 5.3 Flash
+  set out to mate the player instead, until the prompt said a mate to learn is one they give. It
+  also wrote markup inside its sentences ("Your first move: [%next e4]"), which left holes once
+  the commands were taken out, so the prompt shows markup after the comment.
 - When the player moves first and tutoring is on, the agent gets one extra call before that move,
   for a comment and markings on the start: it would otherwise say nothing until it had moved. The
   call also opens the session, so its first move is an ordinary turn. The comment is kept in the
   PGN tag `ChessdeskIntro`, since the comment before the first move holds the player's notes.
 - Legal moves are listed only after an illegal reply, once. Then the game pauses.
-- Forced moves skip the agent.
+- Forced moves skip the agent, unless it coaches: the move that forced it is often the player's worst.
 - A review is one call, covering each of the player's moves.
 
 ## Threads

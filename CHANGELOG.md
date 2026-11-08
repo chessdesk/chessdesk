@@ -3,6 +3,45 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.6.1 - 2026-11-08
+
+### Changed
+
+- The move an agent tells you to play next is drawn blue, like a hint, so it stands out from the
+  green arrows of its own ideas
+- Pi's card in New Game says it has free models, as OpenCode's does: OpenRouter's, which its model
+  list shows under Free, above the rest
+
+### Fixed
+
+- Agents are told where every piece stands on each move, not only the FEN, so they lose track of
+  pieces less: most of their blunders and false claims came from misreading the board
+- Ask an agent to teach you a mate or a trap and it teaches you to give it, naming your move each
+  turn and playing along, instead of setting out to mate you
+- Moves an agent named in its comment no longer vanish from it, leaving gaps such as "Your first
+  move: ."
+- When the player's move leaves the agent only one reply, a coaching agent still comments: that
+  move was often the player's worst, and went unremarked
+- A reply whose only move sits in `[%next]`, where the player's move goes, or is written as "e5's",
+  is played instead of failing the game
+- In tutoring, an agent hears Stockfish's verdict on each of your moves and the better move after
+  a mistake, so it no longer praises blunders or warns of threats that aren't there. It waits the
+  fraction of a second Stockfish takes, and plays on without it if Stockfish isn't installed
+- OpenCode gets Chessdesk's short prompt instead of its own coding one, and no tools: a turn cost
+  about 13,000 tokens of its setup, now about 160. It could also run commands without asking, and
+  a hint once downloaded Stockfish to answer
+- OpenCode no longer reads your `~/.claude/CLAUDE.md` and Claude skills into every game, and no
+  longer spends a call per game on a title
+- After an illegal move you never saw, an agent's comment no longer apologises for it or thanks you
+  for the list of legal moves
+- Pi plays with Chessdesk's prompt and no tools, extensions, MCP servers or `AGENTS.md`: it came
+  with its whole coding setup, and could run commands without asking
+- Pi thinks as hard as the effort picked in New Game, instead of always on its own default
+- An agent that answers with nothing twice, as Pi does when the provider rejects its key, now says
+  so instead of reporting that it found no legal move
+- When an agent fails to move, the error shows in the error bar with the others, under the agent's
+  name, instead of as a line of text in the side panel. Continue still picks the game up again
+
 ## 2.6.0 - 2026-11-08
 
 ### Added

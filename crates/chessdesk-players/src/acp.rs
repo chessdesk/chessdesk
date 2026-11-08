@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use shakmaty::{Color, Position};
 
-use crate::{Decision, Intro, Opponent, PlayerError, Tokens, adapters, prompt, reply};
+use crate::{Decision, Intro, Opponent, PlayerError, Tokens, adapters, pi, prompt, reply};
 
 /// How hard an agent thinks about a move. More effort plays better and costs more.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,12 +113,22 @@ impl AgentKind {
         }
     }
 
-    /// Settings this agent takes from its environment.
-    fn environment(self, effort: Effort) -> Option<(&'static str, String)> {
-        (self == Self::Codex).then(|| {
-            let config = json!({ "model_reasoning_effort": effort.level() });
-            ("CODEX_CONFIG", config.to_string())
-        })
+    /// Settings this agent takes from its environment. `system` is Chessdesk's prompt.
+    fn environment(self, effort: Effort, system: &str) -> Vec<(&'static str, String)> {
+        match self {
+            Self::Codex => {
+                let config = json!({ "model_reasoning_effort": effort.level() });
+                vec![("CODEX_CONFIG", config.to_string())]
+            }
+            Self::OpenCode => opencode_environment(system),
+            Self::ClaudeCode | Self::Copilot | Self::Pi => Vec::new(),
+        }
+    }
+
+    /// Whether the agent gets Chessdesk's prompt from its start, in place of its own,
+    /// without the protocol: `OpenCode` as an agent of its own config, Pi from a launcher.
+    fn prompt_from_start(self) -> bool {
+        matches!(self, Self::OpenCode | Self::Pi)
     }
 
     /// Whether the usage a turn reports is the session's running total, not the turn's.
@@ -146,6 +156,32 @@ impl AgentKind {
         meta.insert("claudeCode".to_owned(), json!({ "options": options }));
         Some(meta)
     }
+}
+
+/// `OpenCode` can't have its prompt replaced over ACP, and by default sends about 13,000
+/// tokens a turn: its coding prompt, ten tool schemas, and the user's `~/.claude/CLAUDE.md`
+/// and skills. It also runs its tools without asking, so a hint once downloaded Stockfish
+/// to answer. This config gives it an agent with Chessdesk's prompt and every tool denied,
+/// which leaves about 160 tokens of its own, and switches off the title it would generate
+/// in a call of its own.
+fn opencode_environment(system: &str) -> Vec<(&'static str, String)> {
+    let config = json!({
+        "default_agent": "chessdesk",
+        "agent": {
+            "chessdesk": {
+                "mode": "primary",
+                "prompt": system,
+                "permission": { "*": "deny" },
+            },
+            "title": { "disable": true },
+        },
+        "autoupdate": false,
+        "share": "disabled",
+    });
+    vec![
+        ("OPENCODE_CONFIG_CONTENT", config.to_string()),
+        ("OPENCODE_DISABLE_CLAUDE_CODE", "1".to_owned()),
+    ]
 }
 
 /// How to run an agent for one game or review.
@@ -221,8 +257,9 @@ fn text_block(text: String) -> ContentBlock {
     ContentBlock::Text(TextContent::new(text))
 }
 
-/// The agent's process, as `config` asks for it.
-fn process(config: &AgentConfig) -> Result<AcpAgent, agent_client_protocol::Error> {
+/// The agent's process, as `config` asks for it, with `system` as its prompt where it
+/// takes that from the start.
+fn process(config: &AgentConfig, system: &str) -> Result<AcpAgent, agent_client_protocol::Error> {
     let Some(mut command) = adapters::command(config.kind, &config.adapters) else {
         return Err(agent_client_protocol::Error::internal_error());
     };
@@ -233,8 +270,15 @@ fn process(config: &AgentConfig) -> Result<AcpAgent, agent_client_protocol::Erro
     );
     let (program, args) = command.split_first().expect("commands are not empty");
     let mut process = AcpAgentConfig::new(program).args(args.iter().cloned());
-    if let Some((name, value)) = config.kind.environment(config.effort) {
+    for (name, value) in config.kind.environment(config.effort, system) {
         process = process.env(name, value);
+    }
+    if config.kind == AgentKind::Pi {
+        // Beside the agents' folder, not in it: that one stays empty.
+        let folder = std::env::temp_dir().join("chessdesk-pi");
+        let launcher = pi::launcher(system, &folder)
+            .map_err(agent_client_protocol::Error::into_internal_error)?;
+        process = process.env("PI_ACP_PI_COMMAND", launcher.display().to_string());
     }
     Ok(AcpAgent::new(process))
 }
@@ -320,7 +364,7 @@ pub fn models(config: &AgentConfig) -> Result<Option<Models>, PlayerError> {
         }));
     }
     let process = |error: agent_client_protocol::Error| PlayerError::Process(error.to_string());
-    let agent = self::process(config).map_err(process)?;
+    let agent = self::process(config, "").map_err(process)?;
     futures::executor::block_on(Client.v1().connect_with(
         agent,
         async move |connection: ConnectionTo<Agent>| {
@@ -348,7 +392,7 @@ async fn run(
     mut incoming: mpsc::UnboundedReceiver<Ask>,
 ) -> Result<(), agent_client_protocol::Error> {
     let model = config.model.as_deref();
-    let agent = process(&config)?;
+    let agent = process(&config, &system)?;
     let meta = config.kind.session_meta(config.effort);
     let reply_text = Arc::new(Mutex::new(String::new()));
     let collected = reply_text.clone();
@@ -396,21 +440,31 @@ async fn run(
             if replaces_prompt {
                 let prompt = SystemPrompt::new(vec![text_block(system)]);
                 session = session.system_prompt(prompt.mode(SystemPromptMode::Override));
-            } else {
+            } else if !config.kind.prompt_from_start() {
                 rules = Some(system);
             }
             let opened = connection.send_request(session).block_task().await?;
             let session = opened.session_id;
-            let offered = opened
-                .config_options
-                .as_deref()
-                .and_then(Models::from_options);
+            let mut options = opened.config_options.unwrap_or_default();
+            let offered = Models::from_options(&options);
             if let Some(change) = model.and_then(|model| model_change(offered.as_ref()?, model)) {
-                connection
+                options = connection
                     .send_request(SetSessionConfigOptionRequest::new(
                         session.clone(),
                         change.0,
                         SessionConfigOptionValue::value_id(change.1),
+                    ))
+                    .block_task()
+                    .await?
+                    .config_options;
+            }
+            // After the model, whose levels these are.
+            if let Some((option, level)) = effort_change(&options, config.effort) {
+                connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session.clone(),
+                        option,
+                        SessionConfigOptionValue::value_id(level),
                     ))
                     .block_task()
                     .await?;
@@ -446,6 +500,27 @@ async fn run(
 fn model_change(offered: &Models, model: &str) -> Option<(String, String)> {
     let option = offered.option.clone()?;
     (offered.current != model).then(|| (option, model.to_owned()))
+}
+
+/// The setting and value that set how hard a session thinks to `effort`, where the agent
+/// offers that as a session setting with the same level: Pi does, and started on its own
+/// default, which was `high`.
+fn effort_change(options: &[SessionConfigOption], effort: Effort) -> Option<(String, String)> {
+    let option = options
+        .iter()
+        .find(|option| option.category == Some(SessionConfigOptionCategory::ThoughtLevel))?;
+    let SessionConfigKind::Select(select) = &option.kind else {
+        return None;
+    };
+    let SessionConfigSelectOptions::Ungrouped(levels) = &select.options else {
+        return None;
+    };
+    let level = effort.level();
+    let offered = levels
+        .iter()
+        .any(|choice| choice.value.to_string() == level);
+    (offered && select.current_value.to_string() != level)
+        .then(|| (option.id.to_string(), level.to_owned()))
 }
 
 /// What a turn added to a running total.
@@ -540,6 +615,12 @@ fn ask_for_move(
             annotations,
             tokens,
         }),
+        // Twice nothing: Pi's adapter ends a turn the provider refused, for a bad key or an
+        // empty quota, with no words and no error, and a model can think a turn away.
+        None if second.trim().is_empty() => Err(PlayerError::Process(
+            "the agent replied with nothing, twice: check its login, its quota and the model"
+                .to_owned(),
+        )),
         None => Err(PlayerError::NoLegalMove { reply: second }),
     }
 }
@@ -547,9 +628,12 @@ fn ask_for_move(
 impl Opponent for AgentOpponent {
     fn next_move(&mut self, game: &Game, instructions: &str) -> Result<Decision, PlayerError> {
         let position = game.position();
-        // A forced move needs no thought, and no tokens.
+        // A forced move needs no thought, and no tokens, unless the agent coaches: the move
+        // that forced it is often the player's worst, and needs a word most.
         let legal = position.legal_moves();
-        if let [only] = legal.as_slice() {
+        if let [only] = legal.as_slice()
+            && !self.annotate
+        {
             return Ok(Decision {
                 played: *only,
                 annotations: Annotations::default(),
@@ -558,7 +642,7 @@ impl Opponent for AgentOpponent {
         }
 
         let text = if self.started {
-            prompt::turn(game)
+            prompt::turn(game, self.annotate)
         } else {
             prompt::opening(game, self.side)
         };
@@ -649,6 +733,24 @@ mod tests {
     }
 
     #[test]
+    fn effort_is_set_where_the_agent_offers_that_level() {
+        let thinking = |current| {
+            let levels = ["off", "low", "medium", "high"]
+                .map(|level| SessionConfigSelectOption::new(level, level))
+                .to_vec();
+            SessionConfigOption::select("thought_level", "Thinking", current, levels)
+                .category(SessionConfigOptionCategory::ThoughtLevel)
+        };
+        assert_eq!(
+            effort_change(&[thinking("high")], Effort::Low),
+            Some(("thought_level".to_owned(), "low".to_owned()))
+        );
+        assert_eq!(effort_change(&[thinking("low")], Effort::Low), None);
+        // No such setting: the effort goes some other way, or not at all.
+        assert_eq!(effort_change(&offered(), Effort::Low), None);
+    }
+
+    #[test]
     fn a_session_switches_only_to_another_model() {
         let models = Models::from_options(&offered()).unwrap();
         assert_eq!(
@@ -707,9 +809,32 @@ mod tests {
 
     #[test]
     fn codex_gets_its_effort_from_the_environment() {
-        let (name, value) = AgentKind::Codex.environment(Effort::High).unwrap();
-        assert_eq!(name, "CODEX_CONFIG");
-        assert_eq!(value, r#"{"model_reasoning_effort":"high"}"#);
-        assert_eq!(AgentKind::Copilot.environment(Effort::High), None);
+        let environment = AgentKind::Codex.environment(Effort::High, "");
+        assert_eq!(
+            environment,
+            [(
+                "CODEX_CONFIG",
+                r#"{"model_reasoning_effort":"high"}"#.to_owned()
+            )]
+        );
+        assert_eq!(AgentKind::Copilot.environment(Effort::High, "").len(), 0);
+    }
+
+    #[test]
+    fn opencode_gets_chessdesks_prompt_and_no_tools() {
+        let environment = AgentKind::OpenCode.environment(Effort::Low, "You play chess.");
+        let config = &environment
+            .iter()
+            .find(|(name, _)| *name == "OPENCODE_CONFIG_CONTENT")
+            .unwrap()
+            .1;
+        let config: Value = serde_json::from_str(config).unwrap();
+        let agent = &config["agent"][config["default_agent"].as_str().unwrap()];
+        assert_eq!(agent["prompt"], "You play chess.");
+        assert_eq!(agent["permission"]["*"], "deny");
+        assert_eq!(config["agent"]["title"]["disable"], true);
+        // Or it would read the user's own CLAUDE.md and skills into every turn.
+        assert!(environment.contains(&("OPENCODE_DISABLE_CLAUDE_CODE", "1".to_owned())));
+        assert!(AgentKind::OpenCode.prompt_from_start());
     }
 }
