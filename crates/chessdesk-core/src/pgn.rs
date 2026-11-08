@@ -59,8 +59,9 @@ fn parse_clock(text: &str) -> Option<Duration> {
     Some(Duration::from_secs(hours * 3600 + minutes * 60) + seconds)
 }
 
-/// A move's comment, without braces, if it has anything to say.
-fn comment(played: &PlayedMove) -> Option<String> {
+/// A move's comment, without braces, if it has anything to say. `before` is the position it
+/// was played from, which the better move is written for.
+fn comment(played: &PlayedMove, before: &Chess) -> Option<String> {
     let mut parts = Vec::new();
     // A closing brace ends a comment, and PGN has no way to escape it.
     let text = played.annotations.text.replace(['{', '}'], "");
@@ -76,6 +77,12 @@ fn comment(played: &PlayedMove) -> Option<String> {
     }
     if let Some(clock) = played.clock {
         parts.push(format!("[%clk {}]", format_clock(clock)));
+    }
+    if let Some(better) = played.better {
+        parts.push(format!(
+            "[%better {}]",
+            SanPlus::from_move(before.clone(), better)
+        ));
     }
     (!parts.is_empty()).then(|| parts.join(" "))
 }
@@ -123,7 +130,7 @@ fn movetext(game: &Game) -> Vec<String> {
             played.san.to_string()
         });
         tokens.extend(played.nags.iter().map(|nag| format!("${nag}")));
-        let text = comment(played);
+        let text = comment(played, &position);
         // After a comment, Black's move needs its number again.
         needs_number = text.is_some();
         tokens.extend(text.map(|text| format!("{{{text}}}")));
@@ -167,6 +174,7 @@ pub fn write_moves_only(game: &Game) -> String {
         played.annotations = Annotations::default();
         played.eval = Eval::default();
         played.clock = None;
+        played.better = None;
     }
     write(&plain)
 }
@@ -263,8 +271,9 @@ impl Visitor for Builder {
         comment: RawComment<'_>,
     ) -> ControlFlow<Self::Output> {
         let comment = String::from_utf8_lossy(comment.as_bytes());
-        if let Some(last) = game.moves_mut().last_mut() {
-            apply_comment(last, &comment);
+        if let Some(index) = game.moves().len().checked_sub(1) {
+            let before = game.position_at(index);
+            apply_comment(&mut game.moves_mut()[index], &comment, &before);
             return ControlFlow::Continue(());
         }
         // Before the first move, it's about the game as a whole.
@@ -296,7 +305,7 @@ impl Visitor for Builder {
     }
 }
 
-fn apply_comment(played: &mut PlayedMove, comment: &str) {
+fn apply_comment(played: &mut PlayedMove, comment: &str, before: &Chess) {
     let (text, commands) = split_commands(comment);
     let mut annotations = Annotations {
         text,
@@ -307,6 +316,13 @@ fn apply_comment(played: &mut PlayedMove, comment: &str) {
             "eval" => played.eval.score = Score::parse(args.trim()),
             "wdl" => played.eval.wdl = Wdl::parse(args),
             "clk" => played.clock = parse_clock(args.trim()),
+            "better" => {
+                played.better = args
+                    .trim()
+                    .parse::<SanPlus>()
+                    .ok()
+                    .and_then(|san| san.san.to_move(before).ok());
+            }
             _ => annotations.add_command(name, args),
         }
     }
@@ -346,7 +362,8 @@ mod tests {
     #[test]
     fn keeps_analysis_through_a_round_trip() {
         let mut game = Game::default();
-        let first = game.position().legal_moves()[0];
+        let legal = game.position().legal_moves();
+        let (first, other) = (legal[0], legal[1]);
         assert!(game.play(first));
         let played = &mut game.moves_mut()[0];
         played.nags.push(2);
@@ -371,20 +388,25 @@ mod tests {
             }],
             text: "A quiet move".to_owned(),
         };
-        assert_eq!(read(&write(&game)).unwrap().moves(), game.moves());
+        played.better = Some(other);
+        let pgn = write(&game);
+        assert!(pgn.contains("[%better "));
+        assert_eq!(read(&pgn).unwrap().moves(), game.moves());
     }
 
     #[test]
     fn moves_only_leaves_out_everything_else() {
         let mut game = Game::default();
-        let first = game.position().legal_moves()[0];
-        assert!(game.play(first));
+        let legal = game.position().legal_moves();
+        assert!(game.play(legal[0]));
         let played = &mut game.moves_mut()[0];
         played.nags.push(4);
         played.annotations.text = "Oops".to_owned();
         played.eval.score = Some(Score::Centipawns(10));
+        played.better = Some(legal[1]);
         let pgn = write_moves_only(&game);
         assert!(!pgn.contains("Oops") && !pgn.contains("%eval") && !pgn.contains('$'));
+        assert!(!pgn.contains("%better"));
         assert_eq!(read(&pgn).unwrap().moves().len(), 1);
     }
 

@@ -81,6 +81,7 @@ fn grade(session: &mut Session, ply: usize) {
             engine_choice == Some(played.played),
         );
         played.nags.extend(verdict.nag());
+        played.better = engine_choice.filter(|best| *best != played.played);
     }
 }
 

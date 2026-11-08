@@ -16,7 +16,7 @@ use gpui::{
 };
 use shakmaty::{Color, Position};
 
-use super::session::Session;
+use super::session::{Feedback, Session};
 use super::{Chessdesk, Dragging, clock};
 use crate::i18n::{tr, tr_with};
 use crate::library::{Standing, standing};
@@ -39,6 +39,8 @@ const GRAPH_HEIGHT: Pixels = px(72.);
 const NUMBER_WIDTH: Pixels = px(30.);
 /// How strongly the result's colour tints its background.
 const RESULT_TINT: f32 = 0.16;
+/// How strongly a verdict card's details show, next to its verdict.
+const FEEDBACK_DETAIL: f32 = 0.75;
 /// What the panel's padding takes off the width of the Analyze button's choices.
 const ANALYZE_MENU_INSET: Pixels = px(24.);
 /// How long a section of the game panel takes to fold or open.
@@ -313,23 +315,55 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
     )
 }
 
-/// How the player's latest move rated.
-fn render_verdict(played: &PlayedMove, verdict: Verdict, settings: &Settings) -> Div {
+/// How the player's latest move rated: a card like the result's, in the verdict's colour,
+/// with what the move did to the likelihood and what would have been better.
+fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
     let colors = &settings.colors;
-    let color = match verdict {
+    let color = match feedback.verdict {
         Verdict::Perfect => colors.mark(Mark::Green),
         Verdict::Good => colors.text,
         Verdict::Inaccuracy => colors.mark(Mark::Yellow),
         Verdict::Mistake => colors.callout,
         Verdict::Blunder => colors.mark(Mark::Red),
     };
+    // The rest in the card's own colour, quieter than the verdict.
+    let detail = color.opacity(FEEDBACK_DETAIL);
+    let percent = |share: f32| (share * 100.).round() as u32;
+    let likelihood = feedback.likelihood.map(|(before, after)| {
+        tr_with!(
+            "verdict-likelihood",
+            before = percent(before),
+            after = percent(after)
+        )
+    });
+    let best = feedback
+        .best
+        .as_ref()
+        .map(|best| tr_with!("verdict-best", best = best.as_str()));
     div()
         .flex()
+        .flex_col()
         .flex_none()
-        .items_center()
-        .gap_1p5()
-        .child(div().text_color(color).child(verdict_text(verdict)))
-        .child(div().text_color(colors.muted).child(played.san.to_string()))
+        .gap_0p5()
+        .px_2()
+        .py_1()
+        .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
+        .bg(color.opacity(RESULT_TINT))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_color(color)
+                        .child(verdict_text(feedback.verdict)),
+                )
+                .child(div().text_color(detail).child(feedback.numbered.clone())),
+        )
+        .children(likelihood.map(|text| div().text_color(detail).child(text)))
+        .children(best.map(|text| div().text_color(detail).child(text)))
 }
 
 /// Whether a side's name fits in its part of the bar. Going by a typical letter's width,
@@ -684,8 +718,8 @@ impl Chessdesk {
             .children(render_result(session, settings))
             .children(
                 session
-                    .latest_verdict()
-                    .map(|(played, verdict)| render_verdict(played, verdict, settings)),
+                    .latest_feedback()
+                    .map(|feedback| render_feedback(&feedback, settings)),
             )
             .children(comment.map(|text| render_bubble(text, settings)))
             .children(paused.map(|reason| div().text_color(settings.colors.callout).child(reason)));

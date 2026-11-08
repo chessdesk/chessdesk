@@ -59,6 +59,9 @@ pub fn evaluate_game(
         progress(index + 1);
     }
     mark_mistakes(game, &best_before);
+    for (played, best) in game.moves_mut().iter_mut().zip(&best_before) {
+        played.better = best.filter(|best| *best != played.played);
+    }
     Ok(())
 }
 

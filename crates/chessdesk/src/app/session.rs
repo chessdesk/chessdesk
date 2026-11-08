@@ -10,6 +10,7 @@ use chessdesk_core::{Annotations, Arrow, Game, Wdl};
 use chessdesk_players::uci::Engine;
 use chessdesk_players::{Opponent, Tokens};
 use gpui::{Entity, SharedString, Subscription};
+use shakmaty::san::SanPlus;
 use shakmaty::{Chess, Color, Move, Outcome, Position, Square};
 
 use super::clock::Clock;
@@ -82,6 +83,17 @@ pub struct Session {
     pub best_moves: BTreeMap<usize, Move>,
     /// The field for the player's notes, once there's a game to take them.
     pub notes: Option<(Entity<TextArea>, Subscription)>,
+}
+
+/// How the player's move rated in tutoring against an engine, and what it's measured by.
+pub struct Feedback {
+    pub verdict: Verdict,
+    /// The move as it stands in the log: `14... Nf6`.
+    pub numbered: String,
+    /// The player's likelihood before the move and after it, from 0 to 1.
+    pub likelihood: Option<(f32, f32)>,
+    /// What the engine would have played instead, if not this.
+    pub best: Option<String>,
 }
 
 /// A hint or the best move, and the position it's for.
@@ -222,8 +234,17 @@ impl Session {
             return Some(0);
         }
         let moves = self.game.moves();
-        let index = moves.iter().position(|played| played.eval.wdl.is_none())?;
-        Some(index + 1)
+        if let Some(index) = moves.iter().position(|played| played.eval.wdl.is_none()) {
+            return Some(index + 1);
+        }
+        // In tutoring, the engine's choice where the player is to move, to tell them what
+        // would have been better: a game picked up again has its evaluations but not that.
+        let latest = moves.len();
+        let tutored = self.live.as_ref().is_some_and(|live| {
+            live.setup.grades_moves() && self.game.position().turn() == live.player
+        });
+        let unknown = !self.best_moves.contains_key(&latest);
+        (tutored && unknown && self.game.outcome() == Outcome::Unknown).then_some(latest)
     }
 
     /// Whether Stockfish has work during this game.
@@ -233,8 +254,8 @@ impl Session {
             .is_some_and(|live| live.setup.live_likelihood || live.setup.grades_moves())
     }
 
-    /// The player's latest move up to the one on show, with its verdict, once there is one.
-    pub fn latest_verdict(&self) -> Option<(&chessdesk_core::PlayedMove, Verdict)> {
+    /// How the player's latest move up to the one on show rated, once it has.
+    pub fn latest_feedback(&self) -> Option<Feedback> {
         let live = self
             .live
             .as_ref()
@@ -245,17 +266,49 @@ impl Session {
         let shown = self.ply.min(moves.len());
         let index = (0..shown).rev().find(|index| index % 2 == mine)?;
         let played = &moves[index];
-        Some((played, Verdict::of_move(played)?))
+        let verdict = Verdict::of_move(played)?;
+        let position = self.game.position_at(index);
+        let before = match index.checked_sub(1) {
+            Some(previous) => moves[previous].eval.wdl,
+            None => self.start_wdl(),
+        };
+        // From the player's side: what the bar shows is White's.
+        let mine = |wdl: Wdl| {
+            let white = wdl.expected();
+            if live.player.is_white() {
+                white
+            } else {
+                1. - white
+            }
+        };
+        let best = played
+            .better
+            .map(|better| SanPlus::from_move(position.clone(), better).to_string());
+        let dots = if position.turn().is_white() {
+            "."
+        } else {
+            "..."
+        };
+        Some(Feedback {
+            verdict,
+            numbered: format!("{}{dots} {}", position.fullmoves(), played.san),
+            likelihood: before
+                .zip(played.eval.wdl)
+                .map(|(before, after)| (mine(before), mine(after))),
+            best,
+        })
     }
 
-    /// The moves from one square to another: more than one means a promotion.
+    /// The moves from one square to another: more than one means a promotion. Castling
+    /// goes to where the king ends up, or onto the rook it castles with.
     pub fn moves_between(&self, from: Square, to: Square) -> Vec<Move> {
         let legal = self.game.position().legal_moves();
         legal
             .iter()
             .filter(|played| {
-                played.from() == Some(from)
-                    && slide_paths(**played).first().map(|(_, to)| *to) == Some(to)
+                let lands = slide_paths(**played).first().map(|(_, to)| *to) == Some(to);
+                let onto_rook = matches!(played, Move::Castle { rook, .. } if *rook == to);
+                played.from() == Some(from) && (lands || onto_rook)
             })
             .copied()
             .collect()
@@ -313,6 +366,27 @@ mod tests {
 
     fn from_a_position() -> Game {
         evaluated(Game::from_position(Game::parse_fen(QUEEN_UP).unwrap()))
+    }
+
+    #[test]
+    fn the_king_castles_onto_its_rook_or_where_it_lands() {
+        let mut game = Game::default();
+        for san in ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"] {
+            let played: shakmaty::san::San = san.parse().unwrap();
+            assert!(game.play(played.to_move(&game.position()).unwrap()));
+        }
+        let session = Session::new(0, game);
+        let castles = |to| {
+            let found = session.moves_between(Square::E1, to);
+            matches!(found.as_slice(), [Move::Castle { .. }])
+        };
+        assert!(castles(Square::H1));
+        assert!(castles(Square::G1));
+        // A step to the side is a step, not castling.
+        assert!(matches!(
+            session.moves_between(Square::E1, Square::F1).as_slice(),
+            [Move::Normal { .. }]
+        ));
     }
 
     #[test]

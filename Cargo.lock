@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "chessdesk-core",
  "chessdesk-players",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-core"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "pgn-reader",
  "proptest",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-players"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "agent-client-protocol",
  "chessdesk-core",

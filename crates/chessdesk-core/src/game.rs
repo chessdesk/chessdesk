@@ -32,6 +32,8 @@ pub struct PlayedMove {
     pub eval: Eval,
     /// The mover's time left after the move.
     pub clock: Option<Duration>,
+    /// What the engine would have played instead, where it chose something else.
+    pub better: Option<Move>,
 }
 
 /// A game of standard chess.
@@ -115,6 +117,7 @@ impl Game {
             annotations: Annotations::default(),
             eval: Eval::default(),
             clock: None,
+            better: None,
         });
         true
     }
