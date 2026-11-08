@@ -25,7 +25,7 @@ board_size = 0.8               # of the room there is, from 0.5 to 1
 animate_moves = true           # glide opponent moves and stepping through a game
 opponent_delay = 1.0           # seconds an opponent's move takes at least, from 0 to 5
 
-corner_radius = 4.0            # buttons, list rows
+corner_radius = 5.0            # buttons, list rows
 popover_radius_extra = 2.0     # added for menus, and twice for dialogs, which look less round
 history_width = 240.0          # the game history; drag its divider to change it
 panel_width = 300.0            # the game panel; drag its divider too

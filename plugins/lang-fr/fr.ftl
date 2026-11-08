@@ -38,6 +38,14 @@ github-repository = Dépôt GitHub
 check-for-updates = Rechercher des mises à jour…
 about-description = Une application d'échecs de bureau pour jouer contre des agents IA et des moteurs.
 about-version = Version { $version }
+update-to = Passer à la { $version }
+restart-to-update = Redémarrer pour mettre à jour
+check-now = Vérifier
+checking-for-updates = Recherche de mises à jour
+up-to-date = Version { $version }, la plus récente
+update-available = La version { $version } est sortie, vous avez la { $current }
+update-ready = La version { $version } est en place : redémarrez pour l'utiliser
+release-notes = Notes de version
 
 ## Window and common buttons
 
@@ -165,6 +173,7 @@ page-engines = Moteurs
 page-agents = Agents
 page-keys = Raccourcis
 page-plugins = Extensions
+page-updates = Mises à jour
 language = Langue
 language-system = Système ({ $language })
 theme = Thème
@@ -211,6 +220,12 @@ agent-needs-node = Cet agent nécessite Node.js.
 agent-adapter-missing = L'adaptateur de { $agent } n'est pas installé.
 stockfish-missing = Stockfish n'est pas installé.
 maia-missing = Maia nécessite lc0 et ses réseaux.
+stockfish-needed = { $feature ->
+    [likelihood] Les chances de gain nécessitent Stockfish
+    [tutoring] Le mode entraînement nécessite Stockfish
+   *[both] Les chances de gain et le mode entraînement nécessitent Stockfish
+}
+stockfish-download-size = Environ 80 Mo, suivi dans la barre de titre
 
 ## Exporting
 
@@ -230,6 +245,8 @@ error-export-game = impossible d'exporter la partie : { $error }
 error-save-setting = impossible d'enregistrer le réglage : { $error }
 error-download = échec du téléchargement : { $error }
 error-install = échec de l'installation : { $error }
+error-update-check = Impossible de rechercher des mises à jour : { $error }
+error-restart = Impossible de redémarrer : { $error }
 error-review = Analyse : { $error }
 error-no-data-folder = aucun dossier de données sur ce système
 invalid-position = Cette position de départ n'est pas valide.

@@ -3,13 +3,21 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
-## 1.8.0 - 2026-11-08
+## 2.0.0 - 2026-11-08
 
 ### Added
 
 - Every agent's own models in New Game, asked from the agent (no tokens), with its default first
   and named. More than five, or none listed as for Copilot, get a list to type in
 - The model playing shows next to the agent's name, the default's too
+- Updates: each start looks for a newer release, and an Update button in the title bar (or
+  Check for updates in the logo's menu) downloads it, under Settings, Updates. It replaces the
+  program where it is, and a restart runs the new version. With no game open, the same button
+  sits next to New game
+- The welcome on first start shows the board and pieces picked, on a board beside the choices
+- Win likelihood, and tutoring against Maia, say when they need Stockfish and download it in one
+  click: in New Game, and in the game panel when likelihood is switched on during a game. Games
+  waiting for it pick up once it's there. Before, the graph stayed empty without a word
 
 ### Changed
 
@@ -17,6 +25,11 @@ minor versions bring features, patch versions only fixes.
 - The opponent list drops "(not installed)", which the card below it already says, and marks
   OpenCode as having free options
 - Opening a list in New Game closes the one already open
+- Corners are a little rounder by default: 5 px instead of 4
+- Notices such as "Stockfish is not installed" use the theme's own colours instead of orange,
+  with their button's label in the regular text colour
+- In light themes the sliders' knob is white and framed, instead of a dark grey block, and their
+  frame has the same light line as the selects' instead of a dark inner edge
 
 ## 1.7.1 - 2026-11-08
 

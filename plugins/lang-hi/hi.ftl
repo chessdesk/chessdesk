@@ -36,6 +36,14 @@ github-repository = GitHub रिपॉज़िटरी
 check-for-updates = अपडेट देखें…
 about-description = AI एजेंटों और इंजनों के साथ खेलने के लिए एक डेस्कटॉप शतरंज ऐप।
 about-version = संस्करण { $version }
+update-to = { $version } पर अपडेट करें
+restart-to-update = अपडेट के लिए फिर से शुरू करें
+check-now = अभी देखें
+checking-for-updates = अपडेट देखे जा रहे हैं
+up-to-date = संस्करण { $version }, सबसे नया
+update-available = संस्करण { $version } आ गया है, आपके पास { $current } है
+update-ready = संस्करण { $version } तैयार है: इसे चलाने के लिए फिर से शुरू करें
+release-notes = रिलीज़ नोट्स
 
 ## Window and common buttons
 
@@ -163,6 +171,7 @@ page-engines = इंजन
 page-agents = एजेंट
 page-keys = कुंजियाँ
 page-plugins = प्लगइन
+page-updates = अपडेट
 language = भाषा
 language-system = सिस्टम ({ $language })
 theme = थीम
@@ -209,6 +218,12 @@ agent-needs-node = इस एजेंट को Node.js चाहिए।
 agent-adapter-missing = { $agent } एडैप्टर इंस्टॉल नहीं है।
 stockfish-missing = Stockfish इंस्टॉल नहीं है।
 maia-missing = Maia को lc0 और उसके नेटवर्क चाहिए।
+stockfish-needed = { $feature ->
+    [likelihood] जीत की संभावना के लिए Stockfish चाहिए
+    [tutoring] सिखाने वाले मोड के लिए Stockfish चाहिए
+   *[both] जीत की संभावना और सिखाने वाले मोड के लिए Stockfish चाहिए
+}
+stockfish-download-size = लगभग 80 MB, प्रगति शीर्षक पट्टी में दिखती है
 
 ## Exporting
 
@@ -228,6 +243,8 @@ error-export-game = खेल निर्यात नहीं हो सक�
 error-save-setting = सेटिंग सहेजी नहीं जा सकी: { $error }
 error-download = डाउनलोड विफल: { $error }
 error-install = इंस्टॉल विफल: { $error }
+error-update-check = अपडेट नहीं देखे जा सके: { $error }
+error-restart = फिर से शुरू नहीं हो सका: { $error }
 error-review = समीक्षा: { $error }
 error-no-data-folder = इस सिस्टम पर कोई डेटा फ़ोल्डर नहीं है
 invalid-position = यह शुरुआती स्थिति मान्य नहीं है।

@@ -180,9 +180,17 @@ impl Chessdesk {
         let installs = cx.new(|_| Installs::default());
         let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
         let events = cx.subscribe(&installs, |this, _, event, cx| match event {
-            installs::Event::Changed => this.reload_settings(cx),
+            installs::Event::Changed => {
+                this.reload_settings(cx);
+                this.evaluate_waiting(cx);
+            }
             installs::Event::Failed(error) => this.report(error.clone(), cx),
         });
+        // Not from a build being worked on, which is never behind and would only use up
+        // GitHub's allowance for the engine downloads.
+        if !cfg!(debug_assertions) {
+            installs.update(cx, |installs, cx| installs.check_for_update(true, cx));
+        }
         let mut this = Self {
             focus,
             sessions: vec![Session::new(0, Game::default())],
@@ -308,7 +316,12 @@ impl Chessdesk {
     }
 
     fn show_new_game(&mut self, cx: &mut Context<Self>) {
-        let dialog = new_game::dialog(Setup::load(), self.catalog.0.clone(), cx);
+        let dialog = new_game::dialog(
+            Setup::load(),
+            self.catalog.0.clone(),
+            self.installs.0.clone(),
+            cx,
+        );
         let subscription = cx.subscribe(&dialog, |this, _, event, cx| {
             this.dialog = None;
             match event {
@@ -336,6 +349,15 @@ impl Chessdesk {
         });
         self.settings_page = Some((view, [redraw, events]));
         cx.notify();
+    }
+
+    /// The Updates page, with its button pressed: the update fetched once one is known, the
+    /// new version started once it's in place, and GitHub asked otherwise.
+    fn update_app(&mut self, cx: &mut Context<Self>) {
+        // New Game would cover the page, as it does at a start with no games yet.
+        self.dialog = None;
+        self.show_settings(SettingsPage::Updates, cx);
+        self.installs.0.update(cx, Installs::update_app);
     }
 
     fn show_export(&mut self, game: Game, path: &Path, cx: &mut Context<Self>) {
@@ -485,8 +507,9 @@ impl Chessdesk {
         ui::divider(id, axis, window, &settings, on_press)
     }
 
-    /// With no game to show there's no board: just the way to start one.
-    fn render_no_game(cx: &mut Context<Self>) -> AnyElement {
+    /// With no game to show there's no board: just the way to start one, and to a newer
+    /// Chessdesk when there is one.
+    fn render_no_game(&self, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
         div()
             .flex()
@@ -499,15 +522,21 @@ impl Chessdesk {
             .gap_6()
             .child(ui::logotype(NO_GAME_LOGOTYPE_HEIGHT, settings.colors.text))
             .child(
-                ui::action_button("start-new", tr("new-game"), &settings)
-                    .on_click(cx.listener(|this, _, _, cx| this.show_new_game(cx))),
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        ui::action_button("start-new", tr("new-game"), &settings)
+                            .on_click(cx.listener(|this, _, _, cx| this.show_new_game(cx))),
+                    )
+                    .children(self.update_button("update-app-empty", cx)),
             )
             .into_any_element()
     }
 
     fn render_board(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if self.session().is_blank() {
-            return Self::render_no_game(cx);
+            return self.render_no_game(cx);
         }
         let size = self.board_size(window, cx);
         let view = self.board_view(size);

@@ -38,6 +38,14 @@ github-repository = GitHub-Repository
 check-for-updates = Nach Updates suchen…
 about-description = Eine Schach-App für den Desktop, um gegen KI-Agenten und Engines zu spielen.
 about-version = Version { $version }
+update-to = Auf { $version } aktualisieren
+restart-to-update = Zum Aktualisieren neu starten
+check-now = Jetzt prüfen
+checking-for-updates = Nach Updates wird gesucht
+up-to-date = Version { $version }, die neueste
+update-available = Version { $version } ist erschienen, installiert ist { $current }
+update-ready = Version { $version } ist installiert: neu starten, um sie zu nutzen
+release-notes = Versionshinweise
 
 ## Window and common buttons
 
@@ -165,6 +173,7 @@ page-engines = Engines
 page-agents = Agenten
 page-keys = Tastenkürzel
 page-plugins = Plugins
+page-updates = Updates
 language = Sprache
 language-system = System ({ $language })
 theme = Farbschema
@@ -211,6 +220,12 @@ agent-needs-node = Dieser Agent benötigt Node.js.
 agent-adapter-missing = Der Adapter für { $agent } ist nicht installiert.
 stockfish-missing = Stockfish ist nicht installiert.
 maia-missing = Maia benötigt lc0 und seine Netze.
+stockfish-needed = { $feature ->
+    [likelihood] Die Gewinnchancen brauchen Stockfish
+    [tutoring] Der Trainingsmodus braucht Stockfish
+   *[both] Gewinnchancen und Trainingsmodus brauchen Stockfish
+}
+stockfish-download-size = Etwa 80 MB, der Fortschritt steht in der Titelleiste
 
 ## Exporting
 
@@ -230,6 +245,8 @@ error-export-game = Die Partie konnte nicht exportiert werden: { $error }
 error-save-setting = Die Einstellung konnte nicht gespeichert werden: { $error }
 error-download = Download fehlgeschlagen: { $error }
 error-install = Installation fehlgeschlagen: { $error }
+error-update-check = Die Suche nach Updates ist fehlgeschlagen: { $error }
+error-restart = Der Neustart ist fehlgeschlagen: { $error }
 error-review = Analyse: { $error }
 error-no-data-folder = Auf diesem System gibt es keinen Datenordner
 invalid-position = Diese Ausgangsstellung ist ungültig.

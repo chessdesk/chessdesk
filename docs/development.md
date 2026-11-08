@@ -35,6 +35,10 @@ nothing. Each run keeps a screenshot per system as an artifact. Look at them: a 
 up but renders wrong still passes.
 
 If all of that passes, it publishes the release with all archives. So to release, bump the version.
+The app finds it through GitHub's latest release and downloads the archive named for its system
+([update.rs](../crates/chessdesk-players/src/update.rs)), so keep the archive names as they are.
+Only optimized builds look at launch: `just release` to try the update button against the last
+release with an older version in `Cargo.toml`.
 To try the builds from a branch without publishing: Actions, Release, Run workflow.
 
 ## Configure

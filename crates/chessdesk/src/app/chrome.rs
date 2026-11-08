@@ -18,6 +18,7 @@ use super::{
     SaveGame, TakeBack, ToggleHistory, ToggleLikelihood, TogglePanel,
 };
 use crate::i18n::{tr, tr_with};
+use crate::installs::AppUpdate;
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
 use crate::trace;
@@ -84,8 +85,19 @@ fn unavailable(title: impl Into<SharedString>) -> Entry {
     }
 }
 
+/// What the update button says, if there's an update to show it for.
+fn update_label(update: &AppUpdate) -> Option<SharedString> {
+    match update {
+        AppUpdate::Available(release) => {
+            Some(tr_with!("update-to", version = release.version.to_string()))
+        }
+        AppUpdate::Ready(..) => Some(tr("restart-to-update")),
+        _ => None,
+    }
+}
+
 /// Entries of a menu; `None` is a separator.
-fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
+fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Option<Entry>> {
     match index {
         0 => vec![
             Some(action("new-game", Some("Ctrl+N"), &NewGameAction)),
@@ -125,7 +137,10 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
             Some(entry(tr("github-repository"), |_, _, cx| {
                 cx.open_url(REPOSITORY);
             })),
-            Some(unavailable(tr("check-for-updates"))),
+            Some(entry(
+                update_label(update).unwrap_or_else(|| tr("check-for-updates")),
+                |this, _, cx| this.update_app(cx),
+            )),
             None,
             Some(action("settings", Some("Ctrl+,"), &OpenSettings)),
             None,
@@ -252,6 +267,8 @@ impl Chessdesk {
                 .window_control_area(WindowControlArea::Drag)
                 .children(loading),
         );
+        let update = self.update_button("update-app", cx);
+        bar = bar.children(update.map(|button| div().flex_none().pr_2().child(button)));
         if cfg!(windows) {
             bar = bar.child(window_controls(&settings, window.is_maximized()));
         }
@@ -262,6 +279,20 @@ impl Chessdesk {
             .child(bar)
             .child(ui::horizontal_line(window, &settings))
             .into_any_element()
+    }
+
+    /// A newer Chessdesk to fetch, or one fetched to start: the way there from anywhere.
+    pub(super) fn update_button(
+        &self,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let label = update_label(self.installs.0.read(cx).app_update())?;
+        let settings = Settings::get(cx);
+        Some(
+            ui::primary_button(id, label, &settings)
+                .on_click(cx.listener(|this, _, _, cx| this.update_app(cx))),
+        )
     }
 
     /// What takes a while right now: in the game on show first, then in the others, then
@@ -400,7 +431,8 @@ impl Chessdesk {
         } else {
             DROPDOWN_OFFSET
         };
-        let rows = menu_entries(index, self.session())
+        let update = self.installs.0.read(cx).app_update().clone();
+        let rows = menu_entries(index, self.session(), &update)
             .into_iter()
             .enumerate()
             .map(|(row, entry)| {

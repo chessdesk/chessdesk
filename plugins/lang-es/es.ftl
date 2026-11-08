@@ -38,6 +38,14 @@ github-repository = Repositorio de GitHub
 check-for-updates = Buscar actualizaciones…
 about-description = Una aplicación de ajedrez de escritorio para jugar contra agentes de IA y motores.
 about-version = Versión { $version }
+update-to = Actualizar a { $version }
+restart-to-update = Reiniciar para actualizar
+check-now = Comprobar ahora
+checking-for-updates = Buscando actualizaciones
+up-to-date = Versión { $version }, la más reciente
+update-available = Ya está la versión { $version }, tienes la { $current }
+update-ready = La versión { $version } está lista: reinicia para usarla
+release-notes = Notas de la versión
 
 ## Window and common buttons
 
@@ -165,6 +173,7 @@ page-engines = Motores
 page-agents = Agentes
 page-keys = Atajos
 page-plugins = Complementos
+page-updates = Actualizaciones
 language = Idioma
 language-system = Sistema ({ $language })
 theme = Tema
@@ -211,6 +220,12 @@ agent-needs-node = Este agente necesita Node.js.
 agent-adapter-missing = El adaptador de { $agent } no está instalado.
 stockfish-missing = Stockfish no está instalado.
 maia-missing = Maia necesita lc0 y sus redes.
+stockfish-needed = { $feature ->
+    [likelihood] La probabilidad de ganar necesita Stockfish
+    [tutoring] El modo tutor necesita Stockfish
+   *[both] La probabilidad de ganar y el modo tutor necesitan Stockfish
+}
+stockfish-download-size = Unos 80 MB; el progreso aparece en la barra de título
 
 ## Exporting
 
@@ -230,6 +245,8 @@ error-export-game = no se pudo exportar la partida: { $error }
 error-save-setting = no se pudo guardar el ajuste: { $error }
 error-download = la descarga falló: { $error }
 error-install = la instalación falló: { $error }
+error-update-check = No se pudieron buscar actualizaciones: { $error }
+error-restart = No se pudo reiniciar: { $error }
 error-review = Análisis: { $error }
 error-no-data-folder = no hay carpeta de datos en este sistema
 invalid-position = Esa posición inicial no es válida.

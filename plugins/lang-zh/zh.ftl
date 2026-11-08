@@ -36,6 +36,14 @@ github-repository = GitHub 仓库
 check-for-updates = 检查更新…
 about-description = 一款可与 AI 智能体和引擎对弈的桌面国际象棋应用。
 about-version = 版本 { $version }
+update-to = 更新到 { $version }
+restart-to-update = 重启以完成更新
+check-now = 立即检查
+checking-for-updates = 正在检查更新
+up-to-date = 版本 { $version }，已是最新
+update-available = 版本 { $version } 已发布，当前为 { $current }
+update-ready = 版本 { $version } 已就绪：重启后生效
+release-notes = 发行说明
 
 ## Window and common buttons
 
@@ -159,6 +167,7 @@ page-engines = 引擎
 page-agents = 智能体
 page-keys = 快捷键
 page-plugins = 插件
+page-updates = 更新
 language = 语言
 language-system = 跟随系统（{ $language }）
 theme = 主题
@@ -205,6 +214,12 @@ agent-needs-node = 这个智能体需要 Node.js。
 agent-adapter-missing = { $agent } 适配器未安装。
 stockfish-missing = Stockfish 未安装。
 maia-missing = Maia 需要 lc0 及其网络。
+stockfish-needed = { $feature ->
+    [likelihood] 胜率需要 Stockfish
+    [tutoring] 教学模式需要 Stockfish
+   *[both] 胜率和教学模式需要 Stockfish
+}
+stockfish-download-size = 约 80 MB，进度显示在标题栏
 
 ## Exporting
 
@@ -224,6 +239,8 @@ error-export-game = 无法导出对局：{ $error }
 error-save-setting = 无法保存设置：{ $error }
 error-download = 下载失败：{ $error }
 error-install = 安装失败：{ $error }
+error-update-check = 无法检查更新：{ $error }
+error-restart = 无法重启：{ $error }
 error-review = 复盘：{ $error }
 error-no-data-folder = 系统上没有数据文件夹
 invalid-position = 这个起始局面无效。

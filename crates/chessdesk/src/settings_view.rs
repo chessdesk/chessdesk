@@ -11,7 +11,7 @@ use gpui::{
 
 use crate::audio;
 use crate::i18n::{self, tr, tr_with};
-use crate::installs::{Engine, Installs};
+use crate::installs::{AppUpdate, Engine, Installs};
 use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
 use crate::setup::{OpponentKind, title_case};
 use crate::ui::{self, Logo};
@@ -54,10 +54,11 @@ pub enum SettingsPage {
     Agents,
     Keys,
     Plugins,
+    Updates,
 }
 
 impl SettingsPage {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Appearance,
         Self::Board,
         Self::Sound,
@@ -65,6 +66,7 @@ impl SettingsPage {
         Self::Agents,
         Self::Keys,
         Self::Plugins,
+        Self::Updates,
     ];
 
     fn title(self) -> SharedString {
@@ -76,6 +78,7 @@ impl SettingsPage {
             Self::Agents => "page-agents",
             Self::Keys => "page-keys",
             Self::Plugins => "page-plugins",
+            Self::Updates => "page-updates",
         })
     }
 }
@@ -596,6 +599,75 @@ impl SettingsView {
         rows
     }
 
+    /// The version running and the latest, and the one button that takes each step between
+    /// them, which the update button in the title bar presses too.
+    fn updates(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        let update = self.installs.read(cx).app_update().clone();
+        let current = env!("CARGO_PKG_VERSION");
+        let version = |release: &chessdesk_players::update::Release| release.version.to_string();
+        let hint = match &update {
+            AppUpdate::Unknown => tr_with!("about-version", version = current),
+            AppUpdate::Checking => tr("checking-for-updates"),
+            AppUpdate::UpToDate => tr_with!("up-to-date", version = current),
+            AppUpdate::Available(release) => tr_with!(
+                "update-available",
+                version = version(release),
+                current = current
+            ),
+            AppUpdate::Downloading(_, done) => {
+                tr_with!("downloading", percent = (done * 100.).round() as u32)
+            }
+            AppUpdate::Ready(release, _) => tr_with!("update-ready", version = version(release)),
+        };
+        let press = cx.listener(|this, _, _, cx| {
+            this.installs.update(cx, Installs::update_app);
+        });
+        let button = match &update {
+            AppUpdate::Unknown | AppUpdate::UpToDate => {
+                ui::action_button("update-app", tr("check-now"), &settings)
+                    .on_click(press)
+                    .into_any_element()
+            }
+            AppUpdate::Checking => {
+                ui::busy_button("update-app", tr("check-now"), &settings).into_any_element()
+            }
+            AppUpdate::Available(release) => ui::primary_button(
+                "update-app",
+                tr_with!("update-to", version = version(release)),
+                &settings,
+            )
+            .on_click(press)
+            .into_any_element(),
+            AppUpdate::Downloading(release, _) => ui::busy_button(
+                "update-app",
+                tr_with!("update-to", version = version(release)),
+                &settings,
+            )
+            .into_any_element(),
+            AppUpdate::Ready(..) => {
+                ui::primary_button("update-app", tr("restart-to-update"), &settings)
+                    .on_click(press)
+                    .into_any_element()
+            }
+        };
+        let page = match &update {
+            AppUpdate::Available(release)
+            | AppUpdate::Downloading(release, _)
+            | AppUpdate::Ready(release, _) => Some(release.page.clone()),
+            _ => None,
+        };
+        let notes = page.map(|page| {
+            ui::action_button("release-notes", tr("release-notes"), &settings)
+                .on_click(move |_, _, cx| cx.open_url(&page))
+        });
+        vec![
+            ui::setting_row("Chessdesk", Some(hint), &settings)
+                .child(div().flex().gap_1().children(notes).child(button))
+                .into_any_element(),
+        ]
+    }
+
     /// The pages, for the sidebar's place.
     pub fn render_nav(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let settings = Settings::get(cx);
@@ -712,6 +784,7 @@ impl SettingsView {
             SettingsPage::Agents => self.agents(cx),
             SettingsPage::Keys => Self::keys(cx),
             SettingsPage::Plugins => Self::plugins(cx),
+            SettingsPage::Updates => self.updates(cx),
         };
         div()
             .id("settings-content")

@@ -14,7 +14,7 @@ use gpui::{
     Corner, CursorStyle, DispatchPhase, Div, ElementId, Hitbox, HitboxBehavior, Hsla, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Stateful,
     Transformation, Window, anchored, canvas, deferred, div, ease_out_quint, fill, percentage,
-    point, prelude::*, px, relative, size, transparent_black,
+    point, prelude::*, px, relative, size, white,
 };
 
 use crate::settings::Settings;
@@ -51,10 +51,12 @@ const SETTING_LOGO_SCALE: f32 = 2.;
 /// How round wide, flat shapes are against the corner radius: on them it looks stronger
 /// than it does on a button.
 pub const FLAT_RADIUS_SCALE: f32 = 0.7;
-/// How strongly a card's colour tints its background: results, verdicts, notices.
+/// How strongly a card's colour tints its background: results and verdicts.
 pub const CARD_TINT: f32 = 0.16;
 /// How strongly a card's details show, next to its main line.
 pub const CARD_DETAIL: f32 = 0.75;
+/// How much of the text colour lifts a notice's button off its card, and again on hover.
+const NOTICE_BUTTON_RAISE: f32 = 0.08;
 /// A setting's description, against its font size: closer than GPUI's default, so that
 /// it reads as one block with its label.
 const HINT_LINE_HEIGHT: f32 = 1.3;
@@ -403,25 +405,23 @@ fn labelled_row(label: Div) -> Div {
         .child(label)
 }
 
-/// Something to see to before going on, such as an engine to fetch: a card tinted like a
-/// game's result, its message and a quieter detail beside room for an action, added as a
-/// child.
+/// Something to see to before going on, such as an engine to fetch: a card in the theme's
+/// own colours, its message and a quieter detail beside room for an action, added as a child.
 pub fn notice(
     message: impl Into<SharedString>,
     detail: Option<SharedString>,
     settings: &Settings,
 ) -> Div {
-    let color = settings.colors.callout;
     let text = div()
         .flex()
         .flex_col()
         .flex_1()
         .min_w_0()
-        .child(div().text_color(color).child(message.into()))
+        .child(div().text_color(settings.colors.text).child(message.into()))
         .children(detail.map(|detail| {
             div()
                 .text_size(settings.ui_font_size * 0.92)
-                .text_color(color.opacity(CARD_DETAIL))
+                .text_color(settings.colors.muted)
                 .child(detail)
         }));
     div()
@@ -431,12 +431,12 @@ pub fn notice(
         .px_2p5()
         .py_2()
         .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
-        .bg(color.opacity(CARD_TINT))
+        .bg(settings.colors.accent)
         .child(text)
 }
 
-/// The button of a [`notice`]: the card's colour, filled a little more strongly than the card,
-/// with no frame. While `busy` a spinner takes the label's place and the button keeps its
+/// The button of a [`notice`]: raised a little from the card, with no frame, its label in
+/// the text colour. While `busy` a spinner takes the label's place and the button keeps its
 /// width; add `on_click` only when it isn't.
 pub fn notice_button(
     id: impl Into<ElementId>,
@@ -445,7 +445,12 @@ pub fn notice_button(
     settings: &Settings,
 ) -> Stateful<Div> {
     let id = id.into();
-    let color = settings.colors.callout;
+    let text = settings.colors.text;
+    let raised = settings
+        .colors
+        .accent
+        .blend(text.opacity(NOTICE_BUTTON_RAISE));
+    let hovered = raised.blend(text.opacity(NOTICE_BUTTON_RAISE));
     let radius = settings.corner_radius;
     let label = div().when(busy, Styled::invisible).child(label.into());
     div()
@@ -458,12 +463,10 @@ pub fn notice_button(
         .h(CONTROL_HEIGHT)
         .px_2()
         .rounded(radius)
-        .text_color(color)
-        .bg(color.opacity(CARD_TINT))
+        .text_color(text)
+        .bg(raised)
         .when(!busy, |button| {
-            button
-                .cursor_pointer()
-                .child(hover_fill(color.opacity(CARD_TINT), radius))
+            button.cursor_pointer().child(hover_fill(hovered, radius))
         })
         .child(label)
         .when(busy, |button| {
@@ -474,7 +477,7 @@ pub fn notice_button(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(spinner(id, settings.ui_font_size, color)),
+                    .child(spinner(id, settings.ui_font_size, settings.colors.muted)),
             )
         })
 }
@@ -845,8 +848,10 @@ pub fn slider(
         state.shown.set(Some(shown));
         let left = bounds.left() + travel * (shown / (count.max(2) - 1) as f32);
 
+        // Clear in the border's own colour: a clear black would shade the border's inner
+        // edge, which shows as a dark line on light themes.
         window.paint_quad(
-            fill(bounds, transparent_black())
+            fill(bounds, colors.popover_border.opacity(0.))
                 .corner_radii(radius)
                 .border_widths(px(1.))
                 .border_color(colors.popover_border),
@@ -855,7 +860,21 @@ pub fn slider(
             point(left, bounds.top()),
             size(SLIDER_KNOB, bounds.size.height),
         );
-        window.paint_quad(fill(knob, colors.muted).corner_radii(radius));
+        // A grey knob is the darkest thing on a light page, so there it's white and framed
+        // like the track, its grooves grey.
+        let light = colors.background.l > 0.5;
+        let groove_color = if light {
+            window.paint_quad(
+                fill(knob, white())
+                    .corner_radii(radius)
+                    .border_widths(px(1.))
+                    .border_color(colors.popover_border),
+            );
+            colors.muted
+        } else {
+            window.paint_quad(fill(knob, colors.muted).corner_radii(radius));
+            colors.background.opacity(0.55)
+        };
         let middle = left + SLIDER_KNOB / 2.;
         for offset in [-SLIDER_GROOVE_GAP, px(0.), SLIDER_GROOVE_GAP] {
             let groove = Bounds::new(
@@ -865,7 +884,7 @@ pub fn slider(
                 ),
                 size(px(1.), bounds.size.height * 0.44),
             );
-            window.paint_quad(fill(groove, colors.background.opacity(0.55)));
+            window.paint_quad(fill(groove, groove_color));
         }
 
         let pick = {

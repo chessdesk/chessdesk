@@ -13,6 +13,7 @@ use gpui::{
 
 use crate::combobox::{self, Combobox};
 use crate::i18n::{tr, tr_with};
+use crate::installs::{self, Installs, NeedsStockfish};
 use crate::models::{Catalog, Offer};
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
@@ -86,9 +87,12 @@ pub struct NewGame {
     error: Option<SharedString>,
     /// What each agent offers, asked for when it's picked.
     catalog: Entity<Catalog>,
+    /// For Stockfish, when what's picked needs it and it isn't there.
+    installs: Entity<Installs>,
     /// The model list to type in, while it's open.
     combobox: Option<(Entity<Combobox>, Subscription)>,
     _catalog_changes: Subscription,
+    _installs_changes: Subscription,
 }
 
 impl EventEmitter<Event> for NewGame {}
@@ -179,17 +183,25 @@ fn nearest_stop(levels: &[u32], level: u32) -> usize {
 }
 
 impl NewGame {
-    pub fn new(setup: Setup, catalog: Entity<Catalog>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        setup: Setup,
+        catalog: Entity<Catalog>,
+        installs: Entity<Installs>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let text = setup.instructions.clone();
         let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
+        let installs_changes = cx.observe(&installs, |_, _, cx| cx.notify());
         let mut dialog = Self {
             setup,
             instructions: cx.new(|cx| TextArea::new(text, tr("instructions-example"), cx)),
             open: None,
             error: None,
             catalog,
+            installs,
             combobox: None,
             _catalog_changes: catalog_changes,
+            _installs_changes: installs_changes,
         };
         dialog.ask_for_models(cx);
         dialog
@@ -613,7 +625,26 @@ impl NewGame {
             );
         }
         rows.extend(self.closing_rows(window, cx));
+        rows.extend(self.stockfish_row(cx));
         rows
+    }
+
+    /// Win likelihood and tutoring against an engine run on Stockfish: the way to it, when
+    /// they're on and it isn't there. Against Stockfish itself, the opponent's card says so.
+    fn stockfish_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let setup = &self.setup;
+        let settings = Settings::get(cx);
+        if setup.opponent == OpponentKind::Stockfish
+            || OpponentKind::Stockfish.missing(&settings).is_none()
+        {
+            return None;
+        }
+        let need = NeedsStockfish::of(setup.live_likelihood, setup.grades_moves())?;
+        Some(
+            installs::stockfish_notice(need, &self.installs, cx)
+                .mt_1()
+                .into_any_element(),
+        )
     }
 
     /// The rows every opponent has, at the end of the dialog.
@@ -748,8 +779,13 @@ impl Render for NewGame {
 }
 
 /// Opens the dialog as a view.
-pub fn dialog(setup: Setup, catalog: Entity<Catalog>, cx: &mut App) -> Entity<NewGame> {
-    cx.new(|cx| NewGame::new(setup, catalog, cx))
+pub fn dialog(
+    setup: Setup,
+    catalog: Entity<Catalog>,
+    installs: Entity<Installs>,
+    cx: &mut App,
+) -> Entity<NewGame> {
+    cx.new(|cx| NewGame::new(setup, catalog, installs, cx))
 }
 
 #[cfg(test)]

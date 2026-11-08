@@ -555,6 +555,19 @@ impl Chessdesk {
 
     /// Has Stockfish look at the next position waiting, if this game wants that. One at a
     /// time and in order, however fast the moves come: a verdict needs both sides of a move.
+    /// Evaluates the games that waited for Stockfish, which may just have arrived.
+    pub(super) fn evaluate_waiting(&mut self, cx: &mut Context<Self>) {
+        let waiting: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|session| session.wants_evaluations())
+            .map(|session| session.id)
+            .collect();
+        for id in waiting {
+            self.evaluate_live(id, cx);
+        }
+    }
+
     fn evaluate_live(&mut self, id: SessionId, cx: &mut Context<Self>) {
         let settings = Settings::get(cx);
         if OpponentKind::Stockfish.missing(&settings).is_some() {

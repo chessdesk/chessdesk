@@ -40,6 +40,14 @@ github-repository = GitHub Repository
 check-for-updates = Check for updates…
 about-description = A desktop chess app for playing AI agents and engines.
 about-version = Version { $version }
+update-to = Update to { $version }
+restart-to-update = Restart to update
+check-now = Check now
+checking-for-updates = Checking for updates
+up-to-date = Version { $version }, the latest
+update-available = Version { $version } is out, you have { $current }
+update-ready = Version { $version } is in place: restart to use it
+release-notes = Release notes
 
 ## Window and common buttons
 
@@ -167,6 +175,7 @@ page-engines = Engines
 page-agents = Agents
 page-keys = Keys
 page-plugins = Plugins
+page-updates = Updates
 language = Language
 language-system = System ({ $language })
 theme = Theme
@@ -213,6 +222,12 @@ agent-needs-node = This agent needs Node.js.
 agent-adapter-missing = The { $agent } adapter isn't installed.
 stockfish-missing = Stockfish is not installed.
 maia-missing = Maia needs lc0 and its networks.
+stockfish-needed = { $feature ->
+    [likelihood] Win likelihood needs Stockfish
+    [tutoring] Tutoring needs Stockfish
+   *[both] Win likelihood and tutoring need Stockfish
+}
+stockfish-download-size = About 80 MB, shown in the title bar as it downloads
 
 ## Exporting
 
@@ -232,6 +247,8 @@ error-export-game = could not export the game: { $error }
 error-save-setting = could not save the setting: { $error }
 error-download = download failed: { $error }
 error-install = install failed: { $error }
+error-update-check = could not check for updates: { $error }
+error-restart = could not restart: { $error }
 error-review = Review: { $error }
 error-no-data-folder = no data folder on this system
 invalid-position = That starting position is not valid.

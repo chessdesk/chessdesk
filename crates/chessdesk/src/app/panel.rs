@@ -19,8 +19,10 @@ use shakmaty::{Color, Position};
 use super::session::{Feedback, Session};
 use super::{Chessdesk, Dragging, clock};
 use crate::i18n::{tr, tr_with};
+use crate::installs::{self, NeedsStockfish};
 use crate::library::{Standing, standing};
 use crate::settings::{Settings, side_name};
+use crate::setup::OpponentKind;
 use crate::ui::{self, Icon, Logo, Transition};
 
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
@@ -750,6 +752,18 @@ impl Chessdesk {
             );
         if self.folds.is_folded(Section::Likelihood, Instant::now()) {
             return Some(section(&settings).child(title));
+        }
+        // Switched on in a game without Stockfish: the way to it, not a graph that stays empty.
+        if session.live.is_some() && OpponentKind::Stockfish.missing(&settings).is_some() {
+            let notice =
+                installs::stockfish_notice(NeedsStockfish::Likelihood, &self.installs.0, cx);
+            let body = div().pt_3().child(notice);
+            return Some(
+                section(&settings)
+                    .gap_0()
+                    .child(title)
+                    .children(self.fold_body(Section::Likelihood, body)),
+            );
         }
         let start = session.start_wdl().map(|wdl| (0, wdl.expected()));
         let moves = session.game.moves().iter().enumerate();

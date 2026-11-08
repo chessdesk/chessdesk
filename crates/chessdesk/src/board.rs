@@ -173,6 +173,47 @@ pub fn render(view: &View, handlers: &Handlers, cx: &App) -> Div {
         .child(overlay)
 }
 
+/// A still picture of `position` in the board and pieces set, for picking a look: nothing on
+/// it marked, and nothing to press.
+pub fn preview(position: &Chess, size: Pixels, cx: &App) -> Div {
+    let settings = Settings::get(cx);
+    let look = &settings.board;
+    let cell = size / 8.;
+    let squares = Square::ALL.into_iter().map(|square| {
+        let (column, row) = grid_position(square, Color::White);
+        let base = if square.is_light() {
+            look.light
+        } else {
+            look.dark
+        };
+        // No coordinates: on squares this small they'd crowd the pieces.
+        div()
+            .absolute()
+            .left(cell * column as f32)
+            .top(cell * row as f32)
+            .size(cell)
+            .when(look.image.is_none(), |square| square.bg(base))
+            .children(
+                position
+                    .board()
+                    .piece_at(square)
+                    .map(|piece| piece_image(settings.pieces.get(piece), cell)),
+            )
+    });
+    let picture = look
+        .image
+        .clone()
+        .map(|image| img(image).absolute().size(size));
+    div()
+        .relative()
+        .flex_none()
+        .size(size)
+        .overflow_hidden()
+        .rounded(settings.corner_radius)
+        .children(picture)
+        .children(squares)
+}
+
 /// A piece gliding above the squares, while its own square holds it back.
 fn render_slide(
     id: u64,

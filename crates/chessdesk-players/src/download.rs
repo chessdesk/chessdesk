@@ -1,5 +1,5 @@
 //! Fetching engines from their official GitHub releases, so that nobody has to hunt for
-//! the right build, and fonts too large to bundle. Blocking, like the rest of this crate.
+//! the right build, fonts too large to bundle, and Chessdesk's own releases. Blocking, like the rest of this crate.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -55,9 +55,9 @@ struct Release {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
+pub(crate) struct Asset {
+    pub(crate) name: String,
+    pub(crate) browser_download_url: String,
 }
 
 /// The end of the Stockfish archive for this operating system and CPU.
@@ -78,7 +78,7 @@ fn lc0_suffix(os: &str) -> Option<&'static str> {
     (os == "windows").then_some("windows-cpu-dnnl.zip")
 }
 
-fn pick<'a>(assets: &'a [Asset], suffix: &str) -> Option<&'a Asset> {
+pub(crate) fn pick<'a>(assets: &'a [Asset], suffix: &str) -> Option<&'a Asset> {
     assets.iter().find(|asset| asset.name.ends_with(suffix))
 }
 
@@ -94,7 +94,7 @@ pub fn can_download_lc0() -> bool {
 
 /// A request to `url`, tried again after a pause while the server says it's struggling:
 /// GitHub turns requests away for minutes at a time now and then.
-fn get(url: &str) -> Result<Response<Body>, String> {
+pub(crate) fn get(url: &str) -> Result<Response<Body>, String> {
     let mut attempt = 1;
     loop {
         match AGENT.get(url).header("User-Agent", USER_AGENT).call() {
@@ -146,7 +146,7 @@ fn latest_assets(url: &str) -> Result<Vec<Asset>, String> {
 }
 
 /// Saves `url` to `target`, reporting the share done from 0 to 1 when the size is known.
-fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
+pub(crate) fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), String> {
     let response = get(url)?;
     let total = response.body().content_length();
     let mut reader = response.into_body().into_reader();
@@ -170,7 +170,7 @@ fn fetch(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> Result<(), 
 }
 
 /// Unpacks an archive into `folder`. Both libraries refuse paths leading out of it.
-fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
+pub(crate) fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
     let file = File::open(archive).map_err(|error| error.to_string())?;
     if archive
         .extension()
@@ -188,7 +188,7 @@ fn unpack(archive: &Path, folder: &Path) -> Result<(), String> {
 
 /// Finds the program in an unpacked archive, wherever it put it: the first file whose
 /// name starts with `prefix`, and on Windows ends in `.exe`.
-fn find_program(folder: &Path, prefix: &str) -> io::Result<Option<PathBuf>> {
+pub(crate) fn find_program(folder: &Path, prefix: &str) -> io::Result<Option<PathBuf>> {
     let mut folders = vec![folder.to_owned()];
     while let Some(current) = folders.pop() {
         let mut entries: Vec<_> = fs::read_dir(current)?.flatten().map(|e| e.path()).collect();
