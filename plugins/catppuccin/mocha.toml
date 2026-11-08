@@ -1,0 +1,22 @@
+# Catppuccin Mocha: the colours of the Catppuccin palette (MIT), in Chessdesk's theme format.
+background = "#1e1e2e"
+accent = "#313244"
+popover = "#181825"
+popover_border = "#3a3b50"
+text = "#cdd6f4"
+muted = "#7f849c"
+icon = "#6c7086"
+caret = "#cba6f7"
+callout = "#fab387"
+keyword = "#cba6f7"
+string = "#a6e3a1"
+comment = "#9399b2"
+function = "#89b4fa"
+type = "#f9e2af"
+number = "#fab387"
+constant = "#f38ba8"
+# Terminal: black, red, green, yellow, blue, magenta, cyan, white, then the bright ones.
+ansi = [
+    "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
+    "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
+]

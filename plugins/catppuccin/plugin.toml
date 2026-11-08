@@ -1,0 +1,8 @@
+name = "catppuccin"
+version = "1.0.0"
+description = "The Catppuccin palette's darkest flavour, in pastels"
+license = "GPL-3.0-or-later"
+
+[[themes]]
+name = "Catppuccin Mocha"
+file = "mocha.toml"

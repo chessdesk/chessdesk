@@ -1,0 +1,10 @@
+# By Alexis Luengas, Apache 2.0 (see LICENSE). These SVGs are the ones Lichess ships:
+# https://github.com/lichess-org/lila/tree/master/public/piece/chessnut
+name = "chessnut"
+version = "1.0.0"
+description = "Modern, rounded pieces"
+license = "Apache-2.0"
+
+[[pieces]]
+name = "Chessnut"
+dir = "svg"

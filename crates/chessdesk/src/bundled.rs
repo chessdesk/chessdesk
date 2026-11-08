@@ -39,12 +39,41 @@ const FILES: &[(&str, &[u8])] = bundle!(
     "merida/svg/bB.svg",
     "merida/svg/bN.svg",
     "merida/svg/bP.svg",
+    "chessnut/plugin.toml",
+    "chessnut/LICENSE",
+    "chessnut/svg/wK.svg",
+    "chessnut/svg/wQ.svg",
+    "chessnut/svg/wR.svg",
+    "chessnut/svg/wB.svg",
+    "chessnut/svg/wN.svg",
+    "chessnut/svg/wP.svg",
+    "chessnut/svg/bK.svg",
+    "chessnut/svg/bQ.svg",
+    "chessnut/svg/bR.svg",
+    "chessnut/svg/bB.svg",
+    "chessnut/svg/bN.svg",
+    "chessnut/svg/bP.svg",
+    "pixel/plugin.toml",
+    "pixel/svg/wK.svg",
+    "pixel/svg/wQ.svg",
+    "pixel/svg/wR.svg",
+    "pixel/svg/wB.svg",
+    "pixel/svg/wN.svg",
+    "pixel/svg/wP.svg",
+    "pixel/svg/bK.svg",
+    "pixel/svg/bQ.svg",
+    "pixel/svg/bR.svg",
+    "pixel/svg/bB.svg",
+    "pixel/svg/bN.svg",
+    "pixel/svg/bP.svg",
     "wood-board/plugin.toml",
     "wood-board/board.jpg",
     "green-board/plugin.toml",
     "green-board/board.jpg",
     "marble-board/plugin.toml",
     "marble-board/board.jpg",
+    "newspaper-board/plugin.toml",
+    "newspaper-board/board.png",
     "wood-sounds/plugin.toml",
     "wood-sounds/sounds/move.ogg",
     "wood-sounds/sounds/capture.ogg",
@@ -83,6 +112,10 @@ const FILES: &[(&str, &[u8])] = bundle!(
     "monokai/monokai.toml",
     "amoled/plugin.toml",
     "amoled/amoled.toml",
+    "solarized/plugin.toml",
+    "solarized/solarized-light.toml",
+    "catppuccin/plugin.toml",
+    "catppuccin/mocha.toml",
 );
 
 /// The set used if the chosen one can't be found, so that a board always has pieces.
@@ -174,20 +207,30 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
         assert!(plugins.errors.is_empty(), "{:?}", plugins.errors);
         let sets: Vec<_> = plugins.sets.iter().map(|set| set.name.as_str()).collect();
-        assert_eq!(sets, ["Cburnett", "Merida"]);
+        assert_eq!(sets, ["Cburnett", "Chessnut", "Merida", "Pixel"]);
         let mut themes: Vec<_> = plugins
             .themes
             .iter()
             .map(|theme| theme.name.as_str())
             .collect();
         themes.sort_unstable();
-        assert_eq!(themes, ["AMOLED Black", "Celeste", "Mariana", "Monokai"]);
+        assert_eq!(
+            themes,
+            [
+                "AMOLED Black",
+                "Catppuccin Mocha",
+                "Celeste",
+                "Mariana",
+                "Monokai",
+                "Solarized Light"
+            ]
+        );
         let boards: Vec<_> = plugins
             .boards
             .iter()
             .map(|board| board.name.as_str())
             .collect();
-        assert_eq!(boards, ["Green", "Marble", "Wood"]);
+        assert_eq!(boards, ["Green", "Marble", "Newspaper", "Wood"]);
         let packs: Vec<_> = plugins.sound_packs.iter().map(|pack| &pack.name).collect();
         assert_eq!(packs, ["Soft", "Wood"]);
         let languages: Vec<_> = plugins.languages.iter().map(|known| &known.name).collect();

@@ -3,6 +3,23 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.1.0 - 2026-11-08
+
+### Added
+
+- The Newspaper board: hatched squares, as in chess books and newspaper diagrams
+- Two piece sets: Chessnut, modern and rounded, and Pixel, in 8-bit pixel art
+- Two colour themes: Solarized Light, on warm paper, and Catppuccin Mocha, in dark pastels
+
+### Changed
+
+- The win likelihood bar takes White's and Black's colours from the theme, softer than the stark
+  white and black before
+
+### Fixed
+
+- In light themes, the board that follows the theme had its light and dark squares swapped
+
 ## 2.0.0 - 2026-11-08
 
 ### Added

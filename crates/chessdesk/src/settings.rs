@@ -112,7 +112,14 @@ impl From<ThemeFile> for Colors {
     fn from(theme: ThemeFile) -> Self {
         let accent: Hsla = theme.accent.into();
         let muted: Hsla = theme.muted.into();
-        let made_light = accent.blend(muted.opacity(0.55));
+        // A board of the theme's own: its accent, and the accent drawn towards the muted
+        // colour. Which of them is lighter depends on the theme: on a light one it's the accent.
+        let toward_muted = accent.blend(muted.opacity(0.55));
+        let (made_light, made_dark) = if toward_muted.l >= accent.l {
+            (toward_muted, accent)
+        } else {
+            (accent, toward_muted)
+        };
         Self {
             background: theme.background.into(),
             accent,
@@ -127,7 +134,7 @@ impl From<ThemeFile> for Colors {
             yellow: theme.ansi[3].into(),
             blue: theme.ansi[4].into(),
             board_light: theme.board_light.map_or(made_light, Hsla::from),
-            board_dark: theme.board_dark.map_or(accent, Hsla::from),
+            board_dark: theme.board_dark.map_or(made_dark, Hsla::from),
         }
     }
 }
@@ -598,6 +605,14 @@ mod tests {
     fn the_defaults_are_complete() {
         let table: Table = toml::from_str(DEFAULT_CONFIG).unwrap();
         let _: Config = table.try_into().unwrap();
+    }
+
+    #[test]
+    fn a_themes_own_board_has_its_light_squares_lighter() {
+        for (name, text) in BUILT_IN_THEMES {
+            let colors = parse_theme(text, &Table::new()).unwrap();
+            assert!(colors.board_light.l > colors.board_dark.l, "{name}");
+        }
     }
 
     #[test]

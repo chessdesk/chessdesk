@@ -1,0 +1,13 @@
+# The board Lichess calls newspaper, by the lila authors and pirouetti, AGPLv3+, drawn from its
+# SVG at 1024 px: https://github.com/lichess-org/lila/tree/master/public/images/board/svg
+name = "newspaper-board"
+version = "1.0.0"
+description = "Hatched squares, as in chess books and newspapers"
+license = "AGPL-3.0-or-later"
+
+[[boards]]
+name = "Newspaper"
+image = "board.png"
+# Both kinds of square are light here, so the coordinates are a mid-grey on either.
+light = "#6f6f6f"
+dark = "#878787"
