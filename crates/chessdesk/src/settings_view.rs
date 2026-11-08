@@ -624,40 +624,41 @@ impl SettingsView {
             .pt_4()
             .text_color(settings.colors.muted)
             .child(tr("installed-plugins"));
-        let row = |name: &str, plugin: &str, license: &str| {
-            let hint = format!("{plugin}, {license}");
-            ui::setting_row(name.to_owned(), Some(hint.into()), &settings).into_any_element()
+        // Each with what its plugin says about itself.
+        let row = |name: &str, description: Option<&String>| {
+            let hint = description.map(|text| SharedString::from(text.clone()));
+            ui::setting_row(name.to_owned(), hint, &settings).into_any_element()
         };
         let mut rows = vec![folder.into_any_element(), heading.into_any_element()];
         rows.extend(
             settings
                 .piece_sets
                 .iter()
-                .map(|set| row(&set.name, &set.plugin, &set.license)),
+                .map(|set| row(&set.name, set.description.as_ref())),
         );
         rows.extend(
             settings
                 .themes
                 .iter()
-                .map(|theme| row(&theme.name, &theme.plugin, &theme.license)),
+                .map(|theme| row(&theme.name, theme.description.as_ref())),
         );
         rows.extend(
             settings
                 .board_themes
                 .iter()
-                .map(|board| row(&board.name, &board.plugin, &board.license)),
+                .map(|board| row(&board.name, board.description.as_ref())),
         );
         rows.extend(
             settings
                 .sound_packs
                 .iter()
-                .map(|pack| row(&pack.name, &pack.plugin, &pack.license)),
+                .map(|pack| row(&pack.name, pack.description.as_ref())),
         );
         rows.extend(
             settings
                 .languages
                 .iter()
-                .map(|language| row(&language.name, &language.plugin, &language.license)),
+                .map(|language| row(&language.name, language.description.as_ref())),
         );
         rows
     }
@@ -707,6 +708,58 @@ impl SettingsView {
                             .child(tr("close")),
                     ),
             )
+    }
+
+    /// What makes Chessdesk look and sound like one's own, for the welcome on first start:
+    /// rows like the pages' own, saved the same way.
+    pub fn render_welcome(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let settings = Settings::get(cx);
+        vec![
+            self.select(
+                "language",
+                tr("language"),
+                &settings.language,
+                &settings.language_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "theme",
+                tr("theme"),
+                &settings.theme,
+                &settings.theme_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "board",
+                tr("board"),
+                &settings.board_name,
+                &settings.board_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "piece_set",
+                tr("pieces"),
+                &settings.piece_set,
+                &settings.piece_set_names,
+                window,
+                cx,
+            ),
+            self.select(
+                "sound_pack",
+                tr("sound-pack"),
+                &settings.sound_pack,
+                &settings.sound_pack_names,
+                window,
+                cx,
+            ),
+        ]
     }
 
     /// The current page, for the board's place.

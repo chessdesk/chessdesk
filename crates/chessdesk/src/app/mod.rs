@@ -26,9 +26,10 @@ use shakmaty::{Color, Role};
 
 use crate::board::{self, Handlers, View};
 use crate::export::{self, ExportDialog};
-use crate::i18n::tr;
+use crate::i18n::{tr, tr_with};
 use crate::library::{self, Entry};
 use crate::new_game::{self, NewGame};
+use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
 use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
@@ -148,6 +149,8 @@ pub struct Chessdesk {
     confirm_delete: Option<Entry>,
     renaming: Option<history::Renaming>,
     about_open: bool,
+    /// The welcome on first start, and what it listens to: its settings and its end.
+    onboarding: Option<(Entity<Onboarding>, [Subscription; 2])>,
     dialog: Option<(Entity<NewGame>, Subscription)>,
     export: Option<(Entity<ExportDialog>, Subscription)>,
     /// While open, the settings' pages take the history's place and their content the board's.
@@ -188,15 +191,46 @@ impl Chessdesk {
             confirm_delete: None,
             renaming: None,
             about_open: false,
+            onboarding: None,
             dialog: None,
             export: None,
             settings_page: None,
             errors: errors.into_iter().map(SharedString::from).collect(),
         };
-        if this.history.is_empty() {
+        if Settings::is_first_run() {
+            this.show_onboarding(cx);
+        } else if this.history.is_empty() {
             this.show_new_game(cx);
         }
         this
+    }
+
+    /// The welcome on first start, then on to a game.
+    fn show_onboarding(&mut self, cx: &mut Context<Self>) {
+        let choices = settings_view::page(SettingsPage::Appearance, cx);
+        let changes = cx.subscribe(&choices, |this, _, event, cx| match event {
+            settings_view::Event::Changed => this.reload_settings(cx),
+            settings_view::Event::Failed(error) => this.report(error.clone(), cx),
+            settings_view::Event::Close => {}
+        });
+        let welcome = onboarding::dialog(choices, cx);
+        let done = cx.subscribe(&welcome, |this, _, _: &onboarding::Done, cx| {
+            this.finish_onboarding(cx);
+        });
+        self.onboarding = Some((welcome, [changes, done]));
+        cx.notify();
+    }
+
+    fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+        self.onboarding = None;
+        // Seen once: from now on there's a config file, even with nothing chosen.
+        if let Err(error) = Settings::config_file() {
+            self.report(tr_with!("error-save-setting", error = error), cx);
+        }
+        if self.history.is_empty() {
+            self.show_new_game(cx);
+        }
+        cx.notify();
     }
 
     /// Keeps the move on show in view in the log.
@@ -596,6 +630,9 @@ impl Chessdesk {
                 this.show_settings(SettingsPage::Appearance, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseOverlay, _, cx| {
+                if this.onboarding.is_some() {
+                    return this.finish_onboarding(cx);
+                }
                 let closed = this.dialog.take().is_some()
                     || this.export.take().is_some()
                     || this.confirm_delete.take().is_some()
@@ -665,6 +702,7 @@ impl Render for Chessdesk {
         let context_menu = self.render_context_menu(window, cx);
         let confirm_delete = self.render_confirm_delete(window, cx);
         let about = self.render_about(window, cx);
+        let welcome = self.onboarding.as_ref().map(|(welcome, _)| welcome.clone());
 
         // Focus is tracked below the title bar: a press on anything that tracks focus
         // counts as handled, and Windows then never sees the window controls pressed.
@@ -686,6 +724,7 @@ impl Render for Chessdesk {
             .children(export)
             .children(confirm_delete)
             .children(about)
+            .children(welcome)
             .children(context_menu);
 
         let root = div()

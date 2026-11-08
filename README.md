@@ -27,8 +27,9 @@ are saved in its PGN file, and agents never see them.
 A dot marks the unfinished ones, and you can drop back in even after a restart.
 
 **Make it yours.** There are piece sets, boards, colour themes and sounds to choose from, and it
-speaks English, German, French and Spanish. It picks up your system's language by itself. Adding your
-own set or language means copying a folder, see [docs/plugins.md](docs/plugins.md).
+speaks English, German, French and Spanish. It picks up your system's language by itself, and the
+first start asks for the main choices. Adding your own set or language means copying a folder, see
+[docs/plugins.md](docs/plugins.md).
 
 ## Getting it
 

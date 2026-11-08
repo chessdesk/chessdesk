@@ -101,6 +101,8 @@ pub struct BoardTheme {
     pub name: String,
     pub plugin: String,
     pub license: String,
+    /// What the plugin says about itself.
+    pub description: Option<String>,
     pub image: PathBuf,
     /// The squares' colours as hex, for the coordinates printed on them.
     pub light: String,
@@ -113,6 +115,8 @@ pub struct SoundPack {
     pub name: String,
     pub plugin: String,
     pub license: String,
+    /// What the plugin says about itself.
+    pub description: Option<String>,
     /// Holds the files [`sound_file`] finds.
     pub dir: PathBuf,
 }
@@ -124,6 +128,8 @@ pub struct Language {
     pub name: String,
     pub plugin: String,
     pub license: String,
+    /// What the plugin says about itself.
+    pub description: Option<String>,
     /// A BCP 47 tag such as `de` or `pt-BR`, for plurals and matching the system's.
     pub locale: String,
     /// A Project Fluent file.
@@ -136,6 +142,8 @@ pub struct Theme {
     pub name: String,
     pub plugin: String,
     pub license: String,
+    /// What the plugin says about itself.
+    pub description: Option<String>,
     /// The colours, as TOML with the keys of a theme file.
     pub colors: String,
 }
@@ -268,6 +276,7 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
             name: entry.name,
             plugin: manifest.name.clone(),
             license: manifest.license.clone(),
+            description: manifest.description.clone(),
             colors,
         });
     }
@@ -281,6 +290,7 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
             name: entry.name,
             plugin: manifest.name.clone(),
             license: manifest.license.clone(),
+            description: manifest.description.clone(),
             image,
             light: entry.light,
             dark: entry.dark,
@@ -293,6 +303,7 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
             name: entry.name,
             plugin: manifest.name.clone(),
             license: manifest.license.clone(),
+            description: manifest.description.clone(),
             dir,
         });
     }
@@ -306,6 +317,7 @@ fn load_plugin(folder: &Path) -> Result<Plugins, String> {
             name: entry.name,
             plugin: manifest.name.clone(),
             license: manifest.license.clone(),
+            description: manifest.description.clone(),
             locale: entry.locale,
             file,
         });

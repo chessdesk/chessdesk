@@ -335,6 +335,11 @@ impl Settings {
         Some(Self::config_dir()?.join("config.toml"))
     }
 
+    /// Whether Chessdesk runs for the first time here: nothing has been set, not even once.
+    pub fn is_first_run() -> bool {
+        Self::config_path().is_some_and(|path| !path.exists())
+    }
+
     /// The config file, created from the defaults if there is none yet, for opening.
     pub fn config_file() -> Result<PathBuf, String> {
         let path = Self::config_path().ok_or("no config folder on this system")?;

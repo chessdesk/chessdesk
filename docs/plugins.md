@@ -7,7 +7,7 @@ start. Plugins are data only. A broken one is named in the error ribbon and the 
 ```toml
 name = "walnut"
 version = "1.0.0"
-description = "Wooden pieces"    # optional
+description = "Wooden pieces"    # optional; shown under Settings, Plugins
 license = "CC0-1.0"              # of the artwork
 
 [[pieces]]                       # any number

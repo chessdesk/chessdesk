@@ -9,6 +9,7 @@ mod export;
 mod i18n;
 mod library;
 mod new_game;
+mod onboarding;
 mod settings;
 mod settings_view;
 mod setup;
