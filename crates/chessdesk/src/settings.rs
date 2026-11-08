@@ -314,6 +314,11 @@ impl Settings {
         self.corner_radius + self.popover_radius_extra
     }
 
+    /// Dialogs are larger still, so they take the extra twice.
+    pub fn dialog_radius(&self) -> Pixels {
+        self.popover_radius() + self.popover_radius_extra
+    }
+
     /// Where plugins live: copying a folder here installs one.
     pub fn plugins_dir() -> Option<PathBuf> {
         Some(Self::config_dir()?.join("plugins"))
@@ -328,6 +333,11 @@ impl Settings {
 
     pub fn config_path() -> Option<PathBuf> {
         Some(Self::config_dir()?.join("config.toml"))
+    }
+
+    /// Whether Chessdesk runs for the first time here: nothing has been set, not even once.
+    pub fn is_first_run() -> bool {
+        Self::config_path().is_some_and(|path| !path.exists())
     }
 
     /// The config file, created from the defaults if there is none yet, for opening.

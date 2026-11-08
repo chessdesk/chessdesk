@@ -62,7 +62,7 @@ board_dark = "#2f3b3b"
 | `crates/chessdesk` | The GPUI app. |
 | `plugins` | The plugins bundled into the binary. |
 
-The solid piece icons are [Font Awesome Free](https://fontawesome.com) (CC BY 4.0). The Claude Code and Codex logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) and remain their owners' marks. The Stockfish logo in `assets` comes from [stockfish-web](https://github.com/official-stockfish/stockfish-web) (MIT).
+The solid piece icons are [Font Awesome Free](https://fontawesome.com) (CC BY 4.0). The Claude Code and Codex logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) and remain their owners' marks. The Stockfish logo in `assets` comes from [stockfish-web](https://github.com/official-stockfish/stockfish-web) (MIT). The Maia logo is the favicon of [maiachess.com](https://www.maiachess.com) and remains its owners' mark.
 
 Try the app without an engine, or check a real agent, which spends real tokens:
 

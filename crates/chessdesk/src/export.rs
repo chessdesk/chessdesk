@@ -75,38 +75,44 @@ impl Render for ExportDialog {
                     .on_click(cx.listener(move |this, _, _, cx| this.pick_format(format, cx)))
             });
         let location: SharedString = self.path.display().to_string().into();
-        ui::modal("export", &settings)
-            .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .child(
-                ui::popover(window, &settings)
-                    .w(DIALOG_WIDTH)
-                    .p_4()
-                    .gap_2()
-                    .text_color(settings.colors.text)
-                    .child(ui::title(tr("export-game"), &settings))
-                    .child(div().flex().flex_col().gap_0p5().children(formats))
-                    .child(
-                        ui::setting_row(tr("export-location"), Some(location), &settings).child(
-                            ui::action_button("choose", tr("choose"), &settings)
-                                .on_click(cx.listener(|this, _, _, cx| this.choose_location(cx))),
+        ui::fade_in(
+            "export-shade",
+            ui::modal("export", &settings)
+                .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .child(ui::rise_in(
+                    "export-in",
+                    ui::dialog(window, &settings)
+                        .w(DIALOG_WIDTH)
+                        .p_4()
+                        .gap_2()
+                        .text_color(settings.colors.text)
+                        .child(ui::title(tr("export-game"), &settings))
+                        .child(div().flex().flex_col().gap_0p5().children(formats))
+                        .child(
+                            ui::setting_row(tr("export-location"), Some(location), &settings)
+                                .child(
+                                    ui::action_button("choose", tr("choose"), &settings).on_click(
+                                        cx.listener(|this, _, _, cx| this.choose_location(cx)),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap_2()
+                                .pt_2()
+                                .child(
+                                    ui::action_button("cancel", tr("cancel"), &settings)
+                                        .on_click(cx.listener(|_, _, _, cx| cx.emit(Event::Done))),
+                                )
+                                .child(
+                                    ui::action_button("export-now", tr("export"), &settings)
+                                        .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
+                                ),
                         ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap_2()
-                            .pt_2()
-                            .child(
-                                ui::action_button("cancel", tr("cancel"), &settings)
-                                    .on_click(cx.listener(|_, _, _, cx| cx.emit(Event::Done))),
-                            )
-                            .child(
-                                ui::action_button("export-now", tr("export"), &settings)
-                                    .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
-                            ),
-                    ),
-            )
+                )),
+        )
     }
 }
 

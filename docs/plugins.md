@@ -7,7 +7,7 @@ start. Plugins are data only. A broken one is named in the error ribbon and the 
 ```toml
 name = "walnut"
 version = "1.0.0"
-description = "Wooden pieces"    # optional
+description = "Wooden pieces"    # optional; shown under Settings, Plugins
 license = "CC0-1.0"              # of the artwork
 
 [[pieces]]                       # any number
@@ -67,7 +67,7 @@ and `board_dark` are optional. Other keys are ignored, so colour themes from
 |---|---|---|
 | [`cburnett`](../plugins/cburnett) | Pieces by Colin M.L. Burnett | GPL 2.0 or later |
 | [`merida`](../plugins/merida) | Pieces by Armando Hernandez Marroquin | GPL 2.0 or later |
-| [`mariana`](../plugins/mariana), [`monokai`](../plugins/monokai), [`celeste`](../plugins/celeste) | Colour themes | GPL 3.0 or later |
+| [`mariana`](../plugins/mariana), [`monokai`](../plugins/monokai), [`celeste`](../plugins/celeste), [`amoled`](../plugins/amoled) | Colour themes | GPL 3.0 or later |
 | [`wood-board`](../plugins/wood-board) | Lichess's wood4 board | AGPL 3.0 or later |
 | [`green-board`](../plugins/green-board) | A green board, its texture made for Chessdesk | GPL 3.0 or later |
 | [`marble-board`](../plugins/marble-board) | Lichess's blue-marble board | AGPL 3.0 or later |

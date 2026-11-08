@@ -77,6 +77,8 @@ const FILES: &[(&str, &[u8])] = bundle!(
     "mariana/mariana.toml",
     "monokai/plugin.toml",
     "monokai/monokai.toml",
+    "amoled/plugin.toml",
+    "amoled/amoled.toml",
 );
 
 /// The set used if the chosen one can't be found, so that a board always has pieces.
@@ -169,7 +171,13 @@ mod tests {
         assert!(plugins.errors.is_empty(), "{:?}", plugins.errors);
         let sets: Vec<_> = plugins.sets.iter().map(|set| set.name.as_str()).collect();
         assert_eq!(sets, ["Cburnett", "Merida"]);
-        assert_eq!(plugins.themes.len(), 3);
+        let mut themes: Vec<_> = plugins
+            .themes
+            .iter()
+            .map(|theme| theme.name.as_str())
+            .collect();
+        themes.sort_unstable();
+        assert_eq!(themes, ["AMOLED Black", "Celeste", "Mariana", "Monokai"]);
         let boards: Vec<_> = plugins
             .boards
             .iter()

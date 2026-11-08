@@ -9,6 +9,7 @@ mod export;
 mod i18n;
 mod library;
 mod new_game;
+mod onboarding;
 mod settings;
 mod settings_view;
 mod setup;
@@ -18,7 +19,7 @@ mod ui;
 use std::borrow::Cow;
 
 use gpui::{
-    App, Application, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowOptions,
+    App, Application, Bounds, SharedString, TitlebarOptions, WindowBounds, WindowOptions, point,
     prelude::*, px, size,
 };
 
@@ -60,7 +61,11 @@ fn main() {
                 titlebar: Some(TitlebarOptions {
                     title: Some(SharedString::new_static("Chessdesk")),
                     appears_transparent: true,
-                    ..Default::default()
+                    // The macOS window buttons, about 14px tall, centred in our bar.
+                    traffic_light_position: Some(point(
+                        px(12.),
+                        (ui::TITLE_BAR_HEIGHT - px(14.)) / 2.,
+                    )),
                 }),
                 ..Default::default()
             };

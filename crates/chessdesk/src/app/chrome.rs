@@ -24,6 +24,8 @@ const DROPDOWN_OFFSET: Pixels = px(26.);
 /// From the top of the logo's button, the height of the ribbon, to its dropdown.
 const BRAND_DROPDOWN_OFFSET: Pixels = px(29.);
 const LOGO_HEIGHT: Pixels = px(11.);
+/// The room the macOS window buttons take at the left of the bar, placed by `main`.
+const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 const PROMOTION_SIZE: Pixels = px(64.);
 /// The menus, as the ids of their titles.
 const MENUS: [&str; 3] = ["menu-game", "menu-review", "menu-view"];
@@ -85,10 +87,6 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
             None,
             Some(action("take-back", Some("Ctrl+Z"), &TakeBack)),
             Some(action("resign", None, &Resign)),
-            None,
-            Some(action("settings", Some("Ctrl+,"), &OpenSettings)),
-            None,
-            Some(action("quit", Some("Ctrl+Q"), &Quit)),
         ],
         1 => {
             let mut entries = vec![Some(action("analyze-with-stockfish", None, &Analyze)), None];
@@ -112,6 +110,10 @@ fn menu_entries(index: usize, session: &Session) -> Vec<Option<Entry>> {
                 cx.open_url(REPOSITORY);
             })),
             Some(unavailable(tr("check-for-updates"))),
+            None,
+            Some(action("settings", Some("Ctrl+,"), &OpenSettings)),
+            None,
+            Some(action("quit", Some("Ctrl+Q"), &Quit)),
         ],
         _ => {
             let mut entries = vec![
@@ -149,7 +151,7 @@ fn window_controls(settings: &Settings, maximized: bool) -> Div {
             .justify_center()
             .h_full()
             .w(ui::WINDOW_CONTROL_WIDTH)
-            .hover(move |style| style.bg(accent))
+            .child(ui::hover_fill(accent, px(0.)))
             .tooltip(ui::tooltip(label))
             .window_control_area(area)
             .child(ui::icon(icon, size, muted))
@@ -205,6 +207,11 @@ impl Chessdesk {
             .items_center()
             .h(ui::TITLE_BAR_HEIGHT)
             .text_color(settings.colors.muted)
+            // Full screen hides the window buttons, and the room they take with them.
+            .when(
+                cfg!(target_os = "macos") && !window.is_fullscreen(),
+                |bar| bar.pl(TRAFFIC_LIGHTS_WIDTH),
+            )
             .child(self.render_brand(window, cx))
             .child(line)
             .child(menus);
@@ -247,7 +254,7 @@ impl Chessdesk {
             .cursor_pointer()
             .text_color(settings.colors.text)
             .when(is_open, |brand| brand.bg(accent))
-            .hover(move |style| style.bg(accent))
+            .child(ui::hover_fill(accent, px(0.)))
             // Acts on press, so that the root's click-away handler never sees it.
             .on_mouse_down(
                 MouseButton::Left,
@@ -263,7 +270,7 @@ impl Chessdesk {
                     cx.notify();
                 }
             }))
-            .child(ui::icon(Icon::Logo, LOGO_HEIGHT, muted))
+            .child(ui::icon(Icon::Logo, LOGO_HEIGHT, settings.colors.text))
             .child("Chessdesk")
             .child(ui::icon(Icon::ChevronDown, settings.ui_font_size, muted));
         let dropdown = is_open.then(|| self.render_dropdown(BRAND_MENU, window, cx));
@@ -289,9 +296,11 @@ impl Chessdesk {
             },
         ));
         Some(
-            ui::modal("about-dialog", &settings)
-                .child(
-                    ui::popover(window, &settings)
+            ui::fade_in(
+                "about-shade",
+                ui::modal("about-dialog", &settings).child(ui::rise_in(
+                    "about-in",
+                    ui::dialog(window, &settings)
                         .w(ABOUT_WIDTH)
                         .p_4()
                         .gap_2()
@@ -301,8 +310,9 @@ impl Chessdesk {
                         .child(tr("about-description"))
                         .child(div().text_color(muted).child(COPYRIGHT))
                         .child(div().flex().justify_end().pt_2().child(close)),
-                )
-                .into_any_element(),
+                )),
+            )
+            .into_any_element(),
         )
     }
 
@@ -370,11 +380,10 @@ impl Chessdesk {
                         .into_any_element(),
                 }
             });
-        deferred(
-            anchored()
-                .offset(point(px(0.), offset))
-                .child(ui::menu(window, &settings).children(rows)),
-        )
+        deferred(anchored().offset(point(px(0.), offset)).child(ui::drop_in(
+            "menu-in",
+            ui::menu(window, &settings).children(rows),
+        )))
         .with_priority(1)
     }
 
@@ -395,24 +404,28 @@ impl Chessdesk {
                 .on_click(cx.listener(move |this, _, _, cx| this.promote(role, cx)))
         });
         Some(
-            div()
-                .id("promotion")
-                .occlude()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(settings.colors.background.opacity(0.7))
-                .child(
-                    ui::popover(window, &settings)
-                        .flex_row()
-                        .gap_1()
-                        .children(choices),
-                )
-                .into_any_element(),
+            ui::fade_in(
+                "promotion-shade",
+                div()
+                    .id("promotion")
+                    .occlude()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(settings.colors.background.opacity(0.7))
+                    .child(ui::rise_in(
+                        "promotion-in",
+                        ui::dialog(window, &settings)
+                            .flex_row()
+                            .gap_1()
+                            .children(choices),
+                    )),
+            )
+            .into_any_element(),
         )
     }
 

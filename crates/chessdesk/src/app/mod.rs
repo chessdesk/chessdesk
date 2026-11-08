@@ -26,14 +26,16 @@ use shakmaty::{Color, Role};
 
 use crate::board::{self, Handlers, View};
 use crate::export::{self, ExportDialog};
-use crate::i18n::tr;
+use crate::i18n::{tr, tr_with};
 use crate::library::{self, Entry};
 use crate::new_game::{self, NewGame};
+use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
 use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
+use panel::{Folds, LogSpace};
 use session::{Session, SessionId};
 
 actions!(
@@ -100,10 +102,12 @@ pub fn bind_keys(cx: &mut App) {
 enum Dragging {
     History,
     Panel,
-    /// Where the press was and how tall the log was then.
+    /// Where the press was, how tall the log stood then, and how tall it could get: as tall
+    /// as the room the opponent's section above had to give.
     Log {
         from: Pixels,
         height: Pixels,
+        most: Pixels,
     },
 }
 
@@ -121,6 +125,9 @@ pub struct Chessdesk {
     history_width: Pixels,
     panel_width: Pixels,
     log_height: Pixels,
+    /// How far each of the game panel's sections is open.
+    folds: Folds,
+    log_space: LogSpace,
     moves_scroll: ScrollHandle,
     /// The game and row of the log last scrolled to, so that it only follows a change and
     /// leaves the player's own scrolling alone.
@@ -128,6 +135,8 @@ pub struct Chessdesk {
     /// Whether to scroll once more: GPUI goes by the log's place in the frame before, and
     /// the log moves when the panel changes along with the game.
     follow_again: bool,
+    /// How tall the log was then, to follow again when that changes.
+    followed_height: Pixels,
     dragging: Option<Dragging>,
     /// The likelihood bars, on their way to the latest numbers.
     likelihood: Motion,
@@ -140,6 +149,8 @@ pub struct Chessdesk {
     confirm_delete: Option<Entry>,
     renaming: Option<history::Renaming>,
     about_open: bool,
+    /// The welcome on first start, and what it listens to: its settings and its end.
+    onboarding: Option<(Entity<Onboarding>, [Subscription; 2])>,
     dialog: Option<(Entity<NewGame>, Subscription)>,
     export: Option<(Entity<ExportDialog>, Subscription)>,
     /// While open, the settings' pages take the history's place and their content the board's.
@@ -166,9 +177,12 @@ impl Chessdesk {
             history_width: settings.history_width,
             panel_width: settings.panel_width,
             log_height: settings.log_height,
+            folds: Folds::new(Instant::now()),
+            log_space: LogSpace::default(),
             moves_scroll: ScrollHandle::new(),
             followed_row: None,
             follow_again: false,
+            followed_height: px(0.),
             dragging: None,
             likelihood: Motion::new(Instant::now()),
             open_menu: None,
@@ -177,15 +191,46 @@ impl Chessdesk {
             confirm_delete: None,
             renaming: None,
             about_open: false,
+            onboarding: None,
             dialog: None,
             export: None,
             settings_page: None,
             errors: errors.into_iter().map(SharedString::from).collect(),
         };
-        if this.history.is_empty() {
+        if Settings::is_first_run() {
+            this.show_onboarding(cx);
+        } else if this.history.is_empty() {
             this.show_new_game(cx);
         }
         this
+    }
+
+    /// The welcome on first start, then on to a game.
+    fn show_onboarding(&mut self, cx: &mut Context<Self>) {
+        let choices = settings_view::page(SettingsPage::Appearance, cx);
+        let changes = cx.subscribe(&choices, |this, _, event, cx| match event {
+            settings_view::Event::Changed => this.reload_settings(cx),
+            settings_view::Event::Failed(error) => this.report(error.clone(), cx),
+            settings_view::Event::Close => {}
+        });
+        let welcome = onboarding::dialog(choices, cx);
+        let done = cx.subscribe(&welcome, |this, _, _: &onboarding::Done, cx| {
+            this.finish_onboarding(cx);
+        });
+        self.onboarding = Some((welcome, [changes, done]));
+        cx.notify();
+    }
+
+    fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+        self.onboarding = None;
+        // Seen once: from now on there's a config file, even with nothing chosen.
+        if let Err(error) = Settings::config_file() {
+            self.report(tr_with!("error-save-setting", error = error), cx);
+        }
+        if self.history.is_empty() {
+            self.show_new_game(cx);
+        }
+        cx.notify();
     }
 
     /// Keeps the move on show in view in the log.
@@ -193,12 +238,15 @@ impl Chessdesk {
         let session = self.session();
         let row = session.log_row();
         let shown = Some((session.id, row));
+        // A log that got shorter, by a smaller window or the divider, may have hidden it.
+        let height = self.log_space.shown();
+        let resized = std::mem::replace(&mut self.followed_height, height) != height;
         if self.followed_row != shown {
             self.followed_row = shown;
             self.follow_again = true;
             self.moves_scroll.scroll_to_item(row);
             window.request_animation_frame();
-        } else if std::mem::take(&mut self.follow_again) {
+        } else if std::mem::take(&mut self.follow_again) || resized {
             self.moves_scroll.scroll_to_item(row);
         }
     }
@@ -368,8 +416,9 @@ impl Chessdesk {
                 let from_edge = width - event.position.x - ui::EDGE_STRIP_SIZE;
                 self.panel_width = from_edge.clamp(MIN_PANE, widest);
             }
-            Dragging::Log { from, height } => {
-                self.log_height = (height + from - event.position.y).clamp(MIN_LOG, MAX_LOG);
+            Dragging::Log { from, height, most } => {
+                let most = most.min(MAX_LOG).max(MIN_LOG);
+                self.log_height = (height + from - event.position.y).clamp(MIN_LOG, most);
             }
         }
         cx.notify();
@@ -581,6 +630,9 @@ impl Chessdesk {
                 this.show_settings(SettingsPage::Appearance, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseOverlay, _, cx| {
+                if this.onboarding.is_some() {
+                    return this.finish_onboarding(cx);
+                }
                 let closed = this.dialog.take().is_some()
                     || this.export.take().is_some()
                     || this.confirm_delete.take().is_some()
@@ -650,6 +702,7 @@ impl Render for Chessdesk {
         let context_menu = self.render_context_menu(window, cx);
         let confirm_delete = self.render_confirm_delete(window, cx);
         let about = self.render_about(window, cx);
+        let welcome = self.onboarding.as_ref().map(|(welcome, _)| welcome.clone());
 
         // Focus is tracked below the title bar: a press on anything that tracks focus
         // counts as handled, and Windows then never sees the window controls pressed.
@@ -671,6 +724,7 @@ impl Render for Chessdesk {
             .children(export)
             .children(confirm_delete)
             .children(about)
+            .children(welcome)
             .children(context_menu);
 
         let root = div()

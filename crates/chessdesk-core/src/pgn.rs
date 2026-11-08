@@ -9,7 +9,7 @@ use std::time::Duration;
 use pgn_reader::{Nag, Outcome, RawComment, RawTag, Reader, SanPlus, Skip, Visitor};
 use shakmaty::{Chess, Position};
 
-use crate::annotation::split_commands;
+use crate::annotation::{split_commands, strip_commands};
 use crate::game::fen_of;
 use crate::{Annotations, Eval, Game, PlayedMove, Score, Wdl};
 
@@ -59,8 +59,9 @@ fn parse_clock(text: &str) -> Option<Duration> {
     Some(Duration::from_secs(hours * 3600 + minutes * 60) + seconds)
 }
 
-/// A move's comment, without braces, if it has anything to say.
-fn comment(played: &PlayedMove) -> Option<String> {
+/// A move's comment, without braces, if it has anything to say. `before` is the position it
+/// was played from, which the better move is written for.
+fn comment(played: &PlayedMove, before: &Chess) -> Option<String> {
     let mut parts = Vec::new();
     // A closing brace ends a comment, and PGN has no way to escape it.
     let text = played.annotations.text.replace(['{', '}'], "");
@@ -76,6 +77,12 @@ fn comment(played: &PlayedMove) -> Option<String> {
     }
     if let Some(clock) = played.clock {
         parts.push(format!("[%clk {}]", format_clock(clock)));
+    }
+    if let Some(better) = played.better {
+        parts.push(format!(
+            "[%better {}]",
+            SanPlus::from_move(before.clone(), better)
+        ));
     }
     (!parts.is_empty()).then(|| parts.join(" "))
 }
@@ -99,9 +106,18 @@ fn write_tags(game: &Game, pgn: &mut String) {
     }
 }
 
+/// The game's notes as a comment, if there are any.
+fn notes(game: &Game) -> Option<String> {
+    // As with a move's comment, braces would end it early.
+    let notes = game.notes.replace(['{', '}'], "");
+    let notes = notes.trim();
+    (!notes.is_empty()).then(|| format!("{{{notes}}}"))
+}
+
 /// The movetext as units that lines may break between.
 fn movetext(game: &Game) -> Vec<String> {
-    let mut tokens = Vec::new();
+    // The game's own comment comes before its first move.
+    let mut tokens: Vec<String> = notes(game).into_iter().collect();
     let mut position = game.start().clone();
     let mut needs_number = true;
     for played in game.moves() {
@@ -114,7 +130,7 @@ fn movetext(game: &Game) -> Vec<String> {
             played.san.to_string()
         });
         tokens.extend(played.nags.iter().map(|nag| format!("${nag}")));
-        let text = comment(played);
+        let text = comment(played, &position);
         // After a comment, Black's move needs its number again.
         needs_number = text.is_some();
         tokens.extend(text.map(|text| format!("{{{text}}}")));
@@ -138,21 +154,27 @@ pub fn write(game: &Game) -> String {
             pgn.push(' ');
             width += 1;
         }
-        width += token.len();
         pgn.push_str(&token);
+        // Notes over several lines go on from where their last line ends.
+        width = match token.rfind('\n') {
+            Some(newline) => token.len() - newline - 1,
+            None => width + token.len(),
+        };
     }
     pgn.push('\n');
     pgn
 }
 
-/// Writes a game as PGN with nothing but its moves: no comments, marks or evaluations.
+/// Writes a game as PGN with nothing but its moves: no notes, comments, marks or evaluations.
 pub fn write_moves_only(game: &Game) -> String {
     let mut plain = game.clone();
+    plain.notes.clear();
     for played in plain.moves_mut() {
         played.nags.clear();
         played.annotations = Annotations::default();
         played.eval = Eval::default();
         played.clock = None;
+        played.better = None;
     }
     write(&plain)
 }
@@ -248,8 +270,19 @@ impl Visitor for Builder {
         game: &mut Self::Movetext,
         comment: RawComment<'_>,
     ) -> ControlFlow<Self::Output> {
-        if let Some(last) = game.moves_mut().last_mut() {
-            apply_comment(last, &String::from_utf8_lossy(comment.as_bytes()));
+        let comment = String::from_utf8_lossy(comment.as_bytes());
+        if let Some(index) = game.moves().len().checked_sub(1) {
+            let before = game.position_at(index);
+            apply_comment(&mut game.moves_mut()[index], &comment, &before);
+            return ControlFlow::Continue(());
+        }
+        // Before the first move, it's about the game as a whole.
+        let notes = strip_commands(&comment);
+        if !notes.is_empty() {
+            if !game.notes.is_empty() {
+                game.notes.push('\n');
+            }
+            game.notes.push_str(&notes);
         }
         ControlFlow::Continue(())
     }
@@ -272,7 +305,7 @@ impl Visitor for Builder {
     }
 }
 
-fn apply_comment(played: &mut PlayedMove, comment: &str) {
+fn apply_comment(played: &mut PlayedMove, comment: &str, before: &Chess) {
     let (text, commands) = split_commands(comment);
     let mut annotations = Annotations {
         text,
@@ -283,6 +316,13 @@ fn apply_comment(played: &mut PlayedMove, comment: &str) {
             "eval" => played.eval.score = Score::parse(args.trim()),
             "wdl" => played.eval.wdl = Wdl::parse(args),
             "clk" => played.clock = parse_clock(args.trim()),
+            "better" => {
+                played.better = args
+                    .trim()
+                    .parse::<SanPlus>()
+                    .ok()
+                    .and_then(|san| san.san.to_move(before).ok());
+            }
             _ => annotations.add_command(name, args),
         }
     }
@@ -322,7 +362,8 @@ mod tests {
     #[test]
     fn keeps_analysis_through_a_round_trip() {
         let mut game = Game::default();
-        let first = game.position().legal_moves()[0];
+        let legal = game.position().legal_moves();
+        let (first, other) = (legal[0], legal[1]);
         assert!(game.play(first));
         let played = &mut game.moves_mut()[0];
         played.nags.push(2);
@@ -347,21 +388,54 @@ mod tests {
             }],
             text: "A quiet move".to_owned(),
         };
-        assert_eq!(read(&write(&game)).unwrap().moves(), game.moves());
+        played.better = Some(other);
+        let pgn = write(&game);
+        assert!(pgn.contains("[%better "));
+        assert_eq!(read(&pgn).unwrap().moves(), game.moves());
     }
 
     #[test]
     fn moves_only_leaves_out_everything_else() {
         let mut game = Game::default();
-        let first = game.position().legal_moves()[0];
-        assert!(game.play(first));
+        let legal = game.position().legal_moves();
+        assert!(game.play(legal[0]));
         let played = &mut game.moves_mut()[0];
         played.nags.push(4);
         played.annotations.text = "Oops".to_owned();
         played.eval.score = Some(Score::Centipawns(10));
+        played.better = Some(legal[1]);
         let pgn = write_moves_only(&game);
         assert!(!pgn.contains("Oops") && !pgn.contains("%eval") && !pgn.contains('$'));
+        assert!(!pgn.contains("%better"));
         assert_eq!(read(&pgn).unwrap().moves().len(), 1);
+    }
+
+    #[test]
+    fn keeps_notes_with_their_line_breaks_before_the_first_move() {
+        let mut game = Game::default();
+        let first = game.position().legal_moves()[0];
+        assert!(game.play(first));
+        game.notes = "Try the London next time.\nWatch the f7 square.".to_owned();
+        let pgn = write(&game);
+        // The moves go on after the notes' last line, not on a line of their own.
+        assert!(pgn.contains("{Try the London next time.\nWatch the f7 square.} 1. "));
+        let read = read(&pgn).unwrap();
+        assert_eq!(read.notes, game.notes);
+        assert_eq!(read.moves()[0].annotations.text, "");
+    }
+
+    #[test]
+    fn reads_another_tools_game_comment_as_notes() {
+        let read = read("{Club night, round 3 [%evp 0,20]} 1. e4 {Best by test} e5 *").unwrap();
+        assert_eq!(read.notes, "Club night, round 3");
+        assert_eq!(read.moves()[0].annotations.text, "Best by test");
+    }
+
+    #[test]
+    fn moves_only_leaves_out_the_notes() {
+        let mut game = Game::default();
+        game.notes = "Private".to_owned();
+        assert!(!write_moves_only(&game).contains("Private"));
     }
 
     #[test]
@@ -389,8 +463,11 @@ mod tests {
         #[test]
         fn random_games_round_trip(
             choices in prop::collection::vec(any::<prop::sample::Index>(), 0..120),
+            // Notes as typed: words and line breaks, with nothing around them.
+            notes in "([a-zA-Z0-9.,!?]{1,8}( |\n)){0,6}[a-zA-Z0-9.,!?]{0,8}",
         ) {
             let mut game = Game::default();
+            game.notes = notes.trim().to_owned();
             for choice in choices {
                 let moves = game.position().legal_moves();
                 if moves.is_empty() {
@@ -401,6 +478,7 @@ mod tests {
             let read = read(&write(&game)).unwrap();
             prop_assert_eq!(read.moves(), game.moves());
             prop_assert_eq!(read.outcome(), game.outcome());
+            prop_assert_eq!(read.notes, game.notes);
         }
     }
 }

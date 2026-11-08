@@ -270,6 +270,7 @@ mod tests {
             name: locale.to_owned(),
             plugin: String::new(),
             license: String::new(),
+            description: None,
             locale: locale.to_owned(),
             file: PathBuf::new(),
         };

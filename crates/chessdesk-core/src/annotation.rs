@@ -128,8 +128,20 @@ fn parse_arrow(entry: &str) -> Option<Arrow> {
     Some(Arrow { from, to, mark })
 }
 
-/// Splits a comment into its plain text and its `[%name args]` commands.
+/// Splits a comment into its plain text, on one line, and its `[%name args]` commands.
 pub fn split_commands(comment: &str) -> (String, Vec<(&str, &str)>) {
+    let (text, commands) = take_commands(comment);
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (text, commands)
+}
+
+/// A comment's plain text with its line breaks kept, its commands left out.
+pub fn strip_commands(comment: &str) -> String {
+    take_commands(comment).0.trim().to_owned()
+}
+
+/// Takes the `[%name args]` commands out of a comment, leaving its text spaced as written.
+fn take_commands(comment: &str) -> (String, Vec<(&str, &str)>) {
     let mut text = String::new();
     let mut commands = Vec::new();
     let mut rest = comment;
@@ -143,7 +155,6 @@ pub fn split_commands(comment: &str) -> (String, Vec<(&str, &str)>) {
         rest = &rest[start + length + 1..];
     }
     text.push_str(rest);
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     (text, commands)
 }
 

@@ -219,9 +219,11 @@ impl Chessdesk {
                 )),
             );
         Some(
-            ui::modal("confirm-delete", &settings)
-                .child(
-                    ui::popover(window, &settings)
+            ui::fade_in(
+                "confirm-delete-shade",
+                ui::modal("confirm-delete", &settings).child(ui::rise_in(
+                    "confirm-delete-in",
+                    ui::dialog(window, &settings)
                         .w(CONFIRM_WIDTH)
                         .p_4()
                         .text_color(settings.colors.text)
@@ -231,8 +233,9 @@ impl Chessdesk {
                         ))
                         .child(div().text_color(settings.colors.muted).child(hint))
                         .child(buttons),
-                )
-                .into_any_element(),
+                )),
+            )
+            .into_any_element(),
         )
     }
 
@@ -275,13 +278,14 @@ impl Chessdesk {
         );
         Some(
             deferred(
-                anchored().position(position).child(
+                anchored().position(position).child(ui::drop_in(
+                    "context-menu-in",
                     ui::menu(window, &settings)
                         .child(rename)
                         .children(resign)
                         .child(export)
                         .child(delete),
-                ),
+                )),
             )
             .with_priority(1)
             .into_any_element(),

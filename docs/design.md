@@ -6,7 +6,7 @@
 |---|---|---|
 | Engines | UCI | The standard. Stockfish and `lc0` both speak it. |
 | Agents | ACP | One client for every agent, and the agent's own login. |
-| Games | PGN and FEN, with `[%csl]`, `[%cal]`, `[%eval]`, `[%clk]` | Saved games and their analysis open in other tools. |
+| Games | PGN and FEN, with `[%csl]`, `[%cal]`, `[%eval]`, `[%clk]`, and Chessdesk's own `[%wdl]` and `[%better]` | Saved games and their analysis open in other tools, which skip what they don't know. |
 | Plugins | Folders with a TOML manifest and plain files | Installing is copying a folder. |
 | Translations | Project Fluent | Plurals for any language, and any message can be left out. |
 

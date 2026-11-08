@@ -1,0 +1,8 @@
+name = "amoled"
+version = "1.0.0"
+description = "The dark theme on true black, for OLED screens"
+license = "GPL-3.0-or-later"
+
+[[themes]]
+name = "AMOLED Black"
+file = "amoled.toml"

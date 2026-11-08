@@ -20,14 +20,16 @@ tokens.
 
 **Go back over your games.** Every game is saved as you play. Open one from the sidebar and press
 Analyze: Stockfish checks each move and marks your mistakes, or an agent goes through your moves one
-by one and explains them. The bar and graph show how the game swung.
+by one and explains them. The bar and graph show how the game swung. Notes you write next to a game
+are saved in its PGN file, and agents never see them.
 
 **Keep several games going.** Start another game and the first one keeps running, clocks included.
 A dot marks the unfinished ones, and you can drop back in even after a restart.
 
 **Make it yours.** There are piece sets, boards, colour themes and sounds to choose from, and it
-speaks English, German, French and Spanish. It picks up your system's language by itself. Adding your
-own set or language means copying a folder, see [docs/plugins.md](docs/plugins.md).
+speaks English, German, French and Spanish. It picks up your system's language by itself, and the
+first start asks for the main choices. Adding your own set or language means copying a folder, see
+[docs/plugins.md](docs/plugins.md).
 
 ## Getting it
 

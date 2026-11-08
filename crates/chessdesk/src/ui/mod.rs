@@ -1,6 +1,8 @@
 //! Shared building blocks, so that every surface looks and behaves the same.
 
+mod hover;
 mod icons;
+mod transition;
 
 use std::time::Duration;
 
@@ -8,14 +10,17 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    Animation, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context, Corner, CursorStyle,
-    DispatchPhase, Div, ElementId, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, SharedString, Stateful, Transformation, Window, anchored, canvas, deferred, div, fill,
-    percentage, point, prelude::*, px, size, transparent_black,
+    Animation, AnimationElement, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context,
+    Corner, CursorStyle, DispatchPhase, Div, ElementId, Hsla, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful, Transformation, Window, anchored,
+    canvas, deferred, div, ease_out_quint, fill, percentage, point, prelude::*, px, size,
+    transparent_black,
 };
 
 use crate::settings::Settings;
+pub use hover::hover_fill;
 pub use icons::{Assets, Icon, Logo, icon, logo, logotype};
+pub use transition::Transition;
 
 const MENU_WIDTH: Pixels = px(260.);
 const TOGGLE_HEIGHT: Pixels = px(14.);
@@ -70,7 +75,7 @@ pub fn list_row(id: impl Into<ElementId>, selected: bool, settings: &Settings) -
         .rounded(settings.corner_radius)
         .cursor_pointer()
         .when(selected, |row| row.bg(accent))
-        .hover(move |style| style.bg(accent))
+        .child(hover_fill(accent, settings.corner_radius))
 }
 
 /// A compact control that lights up on hover: menu titles and moves.
@@ -88,7 +93,8 @@ pub fn button(id: impl Into<ElementId>, active: bool, settings: &Settings) -> St
         .cursor_pointer()
         .text_color(if active { text } else { settings.colors.muted })
         .when(active, |button| button.bg(accent))
-        .hover(move |style| style.bg(accent).text_color(text))
+        .child(hover_fill(accent, settings.corner_radius))
+        .hover(move |style| style.text_color(text))
 }
 
 /// An [`action_button`] that can't be pressed yet.
@@ -199,7 +205,7 @@ pub fn square_button(id: impl Into<ElementId>, name: Icon, settings: &Settings) 
         .cursor_pointer()
         .border_1()
         .border_color(settings.colors.popover_border)
-        .hover(move |style| style.bg(accent))
+        .child(hover_fill(accent, settings.corner_radius))
         .child(icon(name, settings.ui_font_size, settings.colors.muted))
 }
 
@@ -215,6 +221,34 @@ pub fn action_button(
         .text_color(settings.colors.text)
         .border_1()
         .border_color(settings.colors.popover_border)
+        .child(label.into())
+}
+
+/// An [`action_button`] for the main thing to do: filled, in the colour of a speech bubble.
+/// Built afresh rather than from one, since GPUI allows an element only one hover style.
+pub fn primary_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    settings: &Settings,
+) -> Stateful<Div> {
+    let accent = settings.colors.accent;
+    let raised = accent.blend(settings.colors.text.opacity(0.08));
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(CONTROL_HEIGHT)
+        .px_2()
+        .py_0p5()
+        .rounded(settings.corner_radius)
+        .cursor_pointer()
+        .text_color(settings.colors.text)
+        .bg(accent)
+        .border_1()
+        .border_color(accent)
+        .child(hover_fill(raised, settings.corner_radius))
         .child(label.into())
 }
 
@@ -242,6 +276,54 @@ pub fn popover(window: &Window, settings: &Settings) -> Div {
         .border(hairline(window))
         .border_color(settings.colors.popover_border)
         .rounded(settings.popover_radius())
+}
+
+/// The surface of a dialog: a popover, rounder to look as round as the controls in it.
+pub fn dialog(window: &Window, settings: &Settings) -> Div {
+    popover(window, settings).rounded(settings.dialog_radius())
+}
+
+/// How long a dialog, menu or tooltip takes to come in. Going is at once: it's gone by then.
+const APPEAR: Duration = Duration::from_millis(150);
+/// How far a dialog or menu moves as it comes in.
+const APPEAR_TRAVEL: Pixels = px(6.);
+
+/// Fades `element` in as it moves the last of `travel` into place: down from above for a
+/// positive one, up from below for a negative one.
+fn appear<E: Styled + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    travel: Pixels,
+) -> AnimationElement<E> {
+    element.with_animation(
+        id,
+        Animation::new(APPEAR).with_easing(ease_out_quint()),
+        move |element, done| element.opacity(done).top(-travel * (1. - done)),
+    )
+}
+
+/// A menu coming in under what opened it.
+pub fn drop_in<E: Styled + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+) -> AnimationElement<E> {
+    appear(id, element, APPEAR_TRAVEL)
+}
+
+/// A dialog, or a menu that opens upwards, coming in.
+pub fn rise_in<E: Styled + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+) -> AnimationElement<E> {
+    appear(id, element, -APPEAR_TRAVEL)
+}
+
+/// What comes in where it stands: a dialog's shade, a tooltip.
+pub fn fade_in<E: Styled + IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+) -> AnimationElement<E> {
+    appear(id, element, px(0.))
 }
 
 /// A popover for a list of commands.
@@ -370,7 +452,7 @@ pub fn select_button(
         .border_1()
         .border_color(settings.colors.popover_border)
         .when(open, |button| button.bg(accent))
-        .hover(move |style| style.bg(accent))
+        .child(hover_fill(accent, settings.corner_radius))
         .child(
             div()
                 .flex()
@@ -389,12 +471,13 @@ pub fn select_button(
 /// the select itself.
 pub fn select_dropdown(list: impl IntoElement) -> impl IntoElement {
     deferred(
-        anchored().anchor(Corner::TopLeft).child(
+        anchored().anchor(Corner::TopLeft).child(drop_in(
+            "select-list",
             div()
                 .pt(SELECT_LIST_GAP)
                 .pb(CONTROL_HEIGHT + SELECT_LIST_GAP)
                 .child(list),
-        ),
+        )),
     )
     .with_priority(1)
 }
@@ -407,13 +490,16 @@ struct Tooltip {
 impl Render for Tooltip {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = Settings::get(cx);
-        popover(window, &settings)
-            .px_2()
-            .py_1()
-            .font(settings.ui_font.clone())
-            .text_size(settings.ui_font_size * 0.92)
-            .text_color(settings.colors.text)
-            .child(self.text.clone())
+        fade_in(
+            "tooltip",
+            popover(window, &settings)
+                .px_2()
+                .py_1()
+                .font(settings.ui_font.clone())
+                .text_size(settings.ui_font_size * 0.92)
+                .text_color(settings.colors.text)
+                .child(self.text.clone()),
+        )
     }
 }
 
@@ -450,7 +536,7 @@ pub fn divider(
     let handle = div()
         .id(id)
         .absolute()
-        .hover(move |style| style.bg(accent))
+        .child(hover_fill(accent, px(0.)))
         .on_mouse_down(MouseButton::Left, on_press);
     let (line, handle) = match axis {
         Axis::Horizontal => (
@@ -511,7 +597,7 @@ pub fn edge_strip(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .hover(move |style| style.bg(accent))
+        .child(hover_fill(accent, px(0.)))
         .tooltip(tooltip(label))
         .on_click(on_click)
         .child(icon(chevron, settings.ui_font_size, settings.colors.muted));

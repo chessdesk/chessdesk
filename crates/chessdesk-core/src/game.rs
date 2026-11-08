@@ -32,6 +32,8 @@ pub struct PlayedMove {
     pub eval: Eval,
     /// The mover's time left after the move.
     pub clock: Option<Duration>,
+    /// What the engine would have played instead, where it chose something else.
+    pub better: Option<Move>,
 }
 
 /// A game of standard chess.
@@ -39,6 +41,8 @@ pub struct PlayedMove {
 pub struct Game {
     /// PGN tags other than `Result`, `FEN` and `SetUp`, which follow from the game.
     pub tags: Vec<(String, String)>,
+    /// The player's own notes on the game, kept in PGN as the comment before the first move.
+    pub notes: String,
     start: Chess,
     moves: Vec<PlayedMove>,
     /// Set when a game ends off the board: resignation, time, agreement.
@@ -55,6 +59,7 @@ impl Game {
     pub fn from_position(start: Chess) -> Self {
         Self {
             tags: Vec::new(),
+            notes: String::new(),
             start,
             moves: Vec::new(),
             adjudicated: None,
@@ -112,6 +117,7 @@ impl Game {
             annotations: Annotations::default(),
             eval: Eval::default(),
             clock: None,
+            better: None,
         });
         true
     }
