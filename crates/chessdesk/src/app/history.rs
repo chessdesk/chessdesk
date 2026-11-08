@@ -173,7 +173,7 @@ impl Chessdesk {
             .h_full()
             .w(self.history_width)
             .child(div().flex_1().min_w_0().h_full().child(content))
-            .child(Self::render_divider(
+            .child(self.render_divider(
                 "history-divider",
                 Axis::Horizontal,
                 |_, _| Dragging::History,

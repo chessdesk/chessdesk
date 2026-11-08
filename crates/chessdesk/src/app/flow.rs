@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use chessdesk_core::review::{Verdict, loss};
 use chessdesk_core::sound::Sound;
 use chessdesk_core::{Annotations, Arrow, Eval, Game, Mark};
-use chessdesk_players::acp::{AgentConfig, AgentKind, Effort, review_game};
+use chessdesk_players::acp::{AgentConfig, AgentKind, Effort, hint, review_game};
 use chessdesk_players::adapters::{self, Readiness};
 use chessdesk_players::analysis::evaluate_game;
 use chessdesk_players::uci::{Engine, EngineConfig, Limit};
@@ -24,7 +24,7 @@ use crate::board::{SLIDE_TIME, Slide, slide_paths, slide_pieces};
 use crate::i18n::{self, tr, tr_with};
 use crate::library::{self, Meta, Standing};
 use crate::settings::Settings;
-use crate::setup::{OpponentKind, Setup};
+use crate::setup::{OpponentKind, Setup, effort_label};
 use crate::text_area::{Changed, TextArea};
 
 /// How often running clocks are looked at and redrawn.
@@ -100,6 +100,18 @@ fn resumed_clock(game: &Game, setup: &Setup) -> Option<Clock> {
     Some(clock)
 }
 
+/// An agent asked for help rather than to play: reviews and hints. Claude gets Sonnet, which
+/// explains as well for less; the others their own default.
+fn helper_config(kind: AgentKind) -> AgentConfig {
+    AgentConfig {
+        kind,
+        model: (kind == AgentKind::ClaudeCode).then(|| "sonnet".to_owned()),
+        effort: Effort::Medium,
+        adapters: Settings::adapters_dir().unwrap_or_default(),
+        reply_language: i18n::reply_language(),
+    }
+}
+
 impl Chessdesk {
     fn next_id(&mut self) -> SessionId {
         self.next_session += 1;
@@ -153,6 +165,7 @@ impl Chessdesk {
             plan: setup.plan(&settings, player.other()),
             player,
             opponent: None,
+            plan_version: 0,
             thinking: false,
             paused: None,
             clock,
@@ -313,6 +326,7 @@ impl Chessdesk {
         live.thinking = true;
         let mut opponent = live.opponent.take();
         let plan = live.plan.clone();
+        let version = live.plan_version;
         let instructions = live.setup.instructions.clone();
         let delay = Settings::get(cx).opponent_delay;
         cx.spawn(async move |this, cx| {
@@ -337,17 +351,18 @@ impl Chessdesk {
                 cx.background_executor().timer(rest).await;
             }
             this.update(cx, |this, cx| {
-                this.on_decision(id, epoch, opponent, decision, cx);
+                this.on_decision(id, (epoch, version), opponent, decision, cx);
             })
             .ok();
         })
         .detach();
     }
 
+    /// What the opponent decided, asked at the game's `epoch` with the plan's `version`.
     fn on_decision(
         &mut self,
         id: SessionId,
-        epoch: u64,
+        (epoch, version): (u64, u64),
         opponent: Option<Box<dyn Opponent>>,
         decision: Result<Decision, PlayerError>,
         cx: &mut Context<Self>,
@@ -359,7 +374,8 @@ impl Chessdesk {
             return;
         };
         live.thinking = false;
-        live.opponent = opponent;
+        // One started on an older plan, such as another effort, makes way for a new one.
+        live.opponent = opponent.filter(|_| version == live.plan_version);
         if epoch != session.epoch {
             // The position changed under it. Ask about the one on the board now.
             self.ask_opponent(id, cx);
@@ -372,11 +388,55 @@ impl Chessdesk {
                 }
                 self.play(id, decision.played, decision.annotations, true, cx);
             }
+            Err(PlayerError::TimedOut(limit)) => {
+                // Still busy with the move it was asked for: the next ask starts afresh.
+                live.opponent = None;
+                let reason = tr_with!(
+                    "error-timed-out",
+                    agent = live.setup.opponent.name(),
+                    minutes = limit.as_secs() / 60,
+                    effort = effort_label(live.setup.effort).to_string()
+                );
+                live.paused = Some(reason.clone());
+                self.report(reason, cx);
+            }
             Err(error) => {
                 live.paused = Some(error.to_string().into());
                 cx.notify();
             }
         }
+    }
+
+    /// Has the agent of the game on show think harder or less from its next move on. Its
+    /// effort is set when a session starts, so the next move starts a new one, which is told
+    /// the game so far.
+    pub(super) fn set_effort(&mut self, effort: Effort, cx: &mut Context<Self>) {
+        let id = self.active;
+        let settings = Settings::get(cx);
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        let path = session.path.clone();
+        let Some(live) = &mut session.live else {
+            return;
+        };
+        if live.setup.effort == effort || live.setup.opponent.agent().is_none() {
+            return;
+        }
+        live.setup.effort = effort;
+        live.plan = live.setup.plan(&settings, live.player.other());
+        live.plan_version += 1;
+        live.opponent = None;
+        let meta = Meta {
+            setup: live.setup.clone(),
+            player: live.player.is_white(),
+        };
+        if let Some(path) = path
+            && let Err(error) = library::save_meta(&path, &meta)
+        {
+            self.report(tr_with!("error-save-setup", error = error), cx);
+        }
+        cx.notify();
     }
 
     /// Goes on after a pause: asks the opponent again.
@@ -745,7 +805,7 @@ impl Chessdesk {
         let Some(live) = &session.live else {
             return;
         };
-        if live.thinking {
+        if live.thinking || session.suggesting {
             return;
         }
         // Back to the player's own turn.
@@ -802,17 +862,59 @@ impl Chessdesk {
                     Ok::<_, PlayerError>(engine.evaluate(&position, SUGGESTION_LIMIT)?.1)
                 })
                 .await;
-            this.update(cx, |this, cx| this.on_suggestion(id, ply, best, cx))
-                .ok();
+            let best = best.map(|best| {
+                best.map(|played| Decision {
+                    played,
+                    annotations: Annotations::default(),
+                    tokens: None,
+                })
+            });
+            this.update(cx, |this, cx| {
+                this.on_suggestion(id, ply, "Stockfish", best, cx);
+            })
+            .ok();
         })
         .detach();
     }
 
+    /// Has an agent suggest a move for the position on show, and say why: a hint that costs
+    /// tokens, in a session of its own.
+    pub(super) fn suggest_with(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
+        let id = self.active;
+        let adapters_dir = Settings::adapters_dir().unwrap_or_default();
+        if adapters::readiness(kind, &adapters_dir) != Readiness::Ready {
+            return self.report(tr_with!("agent-not-set-up", agent = kind.name()), cx);
+        }
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        if session.suggesting {
+            return;
+        }
+        session.suggesting = true;
+        let ply = session.ply;
+        let position = session.game.position_at(ply);
+        let config = helper_config(kind);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let hint = cx
+                .background_spawn(async move { hint(&config, &position).map(Some) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.on_suggestion(id, ply, kind.name(), hint, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Draws the move `by` came up with, and keeps what it said about it.
     fn on_suggestion(
         &mut self,
         id: SessionId,
         ply: usize,
-        best: Result<Option<Move>, PlayerError>,
+        by: &'static str,
+        best: Result<Option<Decision>, PlayerError>,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self.session_mut(id) else {
@@ -821,17 +923,25 @@ impl Chessdesk {
         session.suggesting = false;
         match best {
             Ok(best) => {
-                let path = best.and_then(|best| slide_paths(best).first().copied());
-                session.suggestion = path.map(|(from, to)| Suggestion {
-                    ply,
-                    arrow: Arrow {
-                        from,
-                        to,
-                        mark: Mark::Blue,
-                    },
+                if let Some(tokens) = best.as_ref().and_then(|best| best.tokens) {
+                    *session.tokens.get_or_insert_default() += tokens;
+                }
+                session.suggestion = best.and_then(|best| {
+                    let (from, to) = slide_paths(best.played).first().copied()?;
+                    let text = best.annotations.text;
+                    Some(Suggestion {
+                        ply,
+                        arrow: Arrow {
+                            from,
+                            to,
+                            mark: Mark::Blue,
+                        },
+                        note: (!text.is_empty())
+                            .then(|| tr_with!("hint-note", agent = by, text = text)),
+                    })
                 });
             }
-            Err(error) => self.report(format!("Stockfish: {error}"), cx),
+            Err(error) => self.report(format!("{by}: {error}"), cx),
         }
         cx.notify();
     }
@@ -981,6 +1091,7 @@ impl Chessdesk {
                 plan: meta.setup.plan(&settings, player.other()),
                 player,
                 opponent: None,
+                plan_version: 0,
                 thinking: false,
                 paused: None,
                 clock: resumed_clock(&session.game, &meta.setup),
@@ -1126,13 +1237,7 @@ impl Chessdesk {
         session.reviewer = Some(kind);
         let mut game = session.game.clone();
         cx.notify();
-        let config = AgentConfig {
-            kind,
-            model: (kind == AgentKind::ClaudeCode).then(|| "sonnet".to_owned()),
-            effort: Effort::Medium,
-            adapters: adapters_dir,
-            reply_language: i18n::reply_language(),
-        };
+        let config = helper_config(kind);
         cx.spawn(async move |this, cx| {
             let reviewed = cx
                 .background_spawn(async move {

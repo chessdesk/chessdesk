@@ -4,10 +4,9 @@ mod hover;
 mod icons;
 mod transition;
 
-use std::time::Duration;
-
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui::{
     Animation, AnimationElement, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context,
@@ -27,6 +26,8 @@ const TOGGLE_HEIGHT: Pixels = px(14.);
 const TOGGLE_INSET: Pixels = px(2.);
 /// How much wider a switch is than tall.
 const TOGGLE_WIDTH: f32 = 1.9;
+/// How long a switch's knob takes to cross.
+const TOGGLE_SLIDE: Duration = Duration::from_millis(150);
 /// The width of selects, which their lists match.
 pub const SELECT_WIDTH: Pixels = px(220.);
 /// Between a select and its list: close enough to read as one control.
@@ -482,37 +483,60 @@ pub fn notice_button(
         })
 }
 
-/// A switch. Add `on_click`.
+/// A switch, its knob sliding across as it flips. Add `on_click`.
 pub fn toggle(
     id: impl Into<ElementId>,
     on: bool,
-    window: &Window,
+    window: &mut Window,
+    cx: &mut App,
     settings: &Settings,
 ) -> Stateful<Div> {
+    let id = id.into();
+    let now = Instant::now();
+    let state = window
+        .use_keyed_state(id.clone(), cx, |_, _| {
+            Cell::new(Transition::settled(on, TOGGLE_SLIDE, now))
+        })
+        .read(cx);
+    let mut transition = state.get();
+    transition.set(on, now);
+    state.set(transition);
+    if transition.is_moving(now) {
+        window.request_animation_frame();
+    }
+    let flipped = transition.value(now);
+
     let height = snap(TOGGLE_HEIGHT, window);
     let inset = snap(TOGGLE_INSET, window);
+    let width = snap(height * TOGGLE_WIDTH, window);
     let knob = height - inset * 2.;
+    let colors = &settings.colors;
+    // The on colour fades in over the off one as the knob crosses.
+    let lit = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .rounded_full()
+        .bg(colors.caret.opacity(flipped));
+    let knob = div()
+        .absolute()
+        .top(inset)
+        .left(inset + (width - inset * 2. - knob) * flipped)
+        .size(knob)
+        .rounded_full()
+        .bg(colors.muted.blend(colors.background.opacity(flipped)));
     div()
         .id(id)
-        .flex()
+        .relative()
         .flex_none()
-        .items_center()
-        .w(snap(height * TOGGLE_WIDTH, window))
+        .w(width)
         .h(height)
-        .px(inset)
         .rounded_full()
         .cursor_pointer()
-        .bg(if on {
-            settings.colors.caret
-        } else {
-            settings.colors.accent
-        })
-        .when(on, gpui::Styled::justify_end)
-        .child(div().size(knob).rounded_full().bg(if on {
-            settings.colors.background
-        } else {
-            settings.colors.muted
-        }))
+        .bg(colors.accent)
+        .child(lit)
+        .child(knob)
 }
 
 /// What a panel with nothing in it shows: the logo, faint, in the middle of its room.
@@ -633,15 +657,74 @@ const STRIPE_PERIOD: Pixels = px(24.);
 const STRIPE_SLIDE: Duration = Duration::from_millis(900);
 /// How strong the gaps between stripes are, next to the stripes' full accent.
 const STRIPE_GAP_OPACITY: f32 = 0.45;
+/// How strongly a [`loading_bar`]'s progress covers the stripes: they still show through.
+const PROGRESS_OPACITY: f32 = 0.25;
+/// How much of the way to its progress the fill covers each frame.
+const PROGRESS_GLIDE: f32 = 0.15;
+/// How close to its progress the fill counts as there.
+const PROGRESS_SETTLED: f32 = 0.002;
 
-/// Slanted stripes sliding along behind `status`, for work that takes a while. It fills
-/// what holds it. `id` keeps the stripes' place across frames, as for a [`spinner`].
+/// Something under way, for a [`loading_bar`]: what it is, and how far along, from 0 to 1,
+/// if that's known.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Activity {
+    pub status: SharedString,
+    pub progress: Option<f32>,
+}
+
+impl Activity {
+    pub fn new(status: impl Into<SharedString>) -> Self {
+        Self {
+            status: status.into(),
+            progress: None,
+        }
+    }
+
+    pub fn with_progress(self, done: f32) -> Self {
+        Self {
+            progress: Some(done.clamp(0., 1.)),
+            ..self
+        }
+    }
+}
+
+/// Slanted stripes sliding along behind the activity's status, for work that takes a while,
+/// and over them a fill as far as its progress, gliding as it grows. It fills what holds it.
+/// `id` keeps the stripes' place and the fill's across frames, as for a [`spinner`].
 pub fn loading_bar(
     id: impl Into<ElementId>,
-    status: impl Into<SharedString>,
+    activity: &Activity,
     settings: &Settings,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Div {
+    let id = id.into();
     let accent = settings.colors.accent;
+    let fill = activity.progress.map(|target| {
+        let state = window
+            .use_keyed_state(
+                ElementId::NamedChild(Box::new(id.clone()), "progress".into()),
+                cx,
+                |_, _| Cell::new(target),
+            )
+            .read(cx);
+        let shown = state.get();
+        // Back to the start is a new task: no gliding backwards.
+        let shown = if target < shown || (target - shown).abs() < PROGRESS_SETTLED {
+            target
+        } else {
+            window.request_animation_frame();
+            shown + (target - shown) * PROGRESS_GLIDE
+        };
+        state.set(shown);
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .h_full()
+            .w(relative(shown))
+            .bg(settings.colors.text.opacity(PROGRESS_OPACITY))
+    });
     let stripes = div()
         .absolute()
         .top_0()
@@ -667,7 +750,7 @@ pub fn loading_bar(
         .min_w_0()
         .truncate()
         .text_center()
-        .child(status.into());
+        .child(activity.status.clone());
     div()
         .relative()
         .flex()
@@ -678,6 +761,7 @@ pub fn loading_bar(
         .text_color(settings.colors.text)
         .bg(accent.opacity(STRIPE_GAP_OPACITY))
         .child(stripes)
+        .children(fill)
         .child(label)
 }
 
@@ -719,30 +803,33 @@ pub fn divider(
         .absolute()
         .child(hover_fill(accent, px(0.)))
         .on_mouse_down(MouseButton::Left, on_press);
-    let (line, handle) = match axis {
-        Axis::Horizontal => (
-            div().w(thin).h_full(),
-            handle
-                .top_0()
-                .bottom_0()
-                .left(-DIVIDER_REACH)
-                .w(DIVIDER_REACH * 2. + thin)
-                .cursor(CursorStyle::ResizeLeftRight),
-        ),
-        Axis::Vertical => (
-            div().h(thin).w_full(),
-            handle
-                .left_0()
-                .right_0()
-                .top(-DIVIDER_REACH)
-                .h(DIVIDER_REACH * 2. + thin)
-                .cursor(CursorStyle::ResizeUpDown),
-        ),
+    let handle = match axis {
+        Axis::Horizontal => handle
+            .top_0()
+            .bottom_0()
+            .left(-DIVIDER_REACH)
+            .w(DIVIDER_REACH * 2. + thin)
+            .cursor(CursorStyle::ResizeLeftRight),
+        Axis::Vertical => handle
+            .left_0()
+            .right_0()
+            .top(-DIVIDER_REACH)
+            .h(DIVIDER_REACH * 2. + thin)
+            .cursor(CursorStyle::ResizeUpDown),
     };
-    line.relative()
-        .flex_none()
-        .bg(settings.colors.popover_border)
+    divider_line(axis, window, settings)
+        .relative()
         .child(deferred(handle))
+}
+
+/// A [`divider`]'s line alone, with nothing to grab.
+pub fn divider_line(axis: Axis, window: &Window, settings: &Settings) -> Div {
+    let thin = hairline(window);
+    let line = match axis {
+        Axis::Horizontal => div().w(thin).h_full(),
+        Axis::Vertical => div().h(thin).w_full(),
+    };
+    line.flex_none().bg(settings.colors.popover_border)
 }
 
 /// Which edge of the window an [`edge_strip`] sits at.

@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use chessdesk_core::Game;
 use chessdesk_core::material::{self, Captures};
+use chessdesk_players::acp::AgentKind;
 use gpui::{
     AnyElement, App, Axis, Context, Div, Entity, FocusHandle, KeyBinding, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, SharedString,
@@ -34,7 +35,7 @@ use crate::new_game::{self, NewGame};
 use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
 use crate::settings_view::{self, SettingsPage, SettingsView};
-use crate::setup::Setup;
+use crate::setup::{OpponentKind, Setup};
 use crate::trace::Trace;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
@@ -144,8 +145,8 @@ pub struct Chessdesk {
     /// The likelihood bars, on their way to the latest numbers.
     likelihood: Motion,
     open_menu: Option<usize>,
-    /// Whether the Analyze button's choices are open.
-    analyze_menu: bool,
+    /// Which button's choices of Stockfish or an agent are open: Analyze's or Hint's.
+    helper_menu: Option<panel::HelperMenu>,
     /// The game whose row was right-clicked, and where.
     context_menu: Option<(Entry, Point<Pixels>)>,
     /// The game waiting for a yes before it's deleted.
@@ -175,7 +176,7 @@ impl Chessdesk {
         focus.focus(window);
         watch_settings(cx);
         let settings = Settings::get(cx);
-        let catalog = cx.new(|_| Catalog::default());
+        let catalog = cx.new(|_| Catalog::load());
         let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
         let installs = cx.new(|_| Installs::default());
         let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
@@ -213,7 +214,7 @@ impl Chessdesk {
             dragging: None,
             likelihood: Motion::new(Instant::now()),
             open_menu: None,
-            analyze_menu: false,
+            helper_menu: None,
             context_menu: None,
             confirm_delete: None,
             renaming: None,
@@ -248,19 +249,29 @@ impl Chessdesk {
             settings_view::Event::Failed(error) => this.report(error.clone(), cx),
             settings_view::Event::Close => {}
         });
-        let welcome = onboarding::dialog(choices, cx);
-        let done = cx.subscribe(&welcome, |this, _, _: &onboarding::Done, cx| {
-            this.finish_onboarding(cx);
+        let welcome = onboarding::dialog(choices, self.installs.0.clone(), cx);
+        let done = cx.subscribe(&welcome, |this, _, done: &onboarding::Done, cx| {
+            this.finish_onboarding(done.agent, cx);
         });
         self.onboarding = Some((welcome, [changes, done]));
         cx.notify();
     }
 
-    fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+    /// The welcome is over: `agent`, if one was picked, plays the first game.
+    fn finish_onboarding(&mut self, agent: Option<AgentKind>, cx: &mut Context<Self>) {
         self.onboarding = None;
         // Seen once: from now on there's a config file, even with nothing chosen.
         if let Err(error) = Settings::config_file() {
             self.report(tr_with!("error-save-setting", error = error), cx);
+        }
+        if let Some(kind) = agent {
+            let setup = Setup {
+                opponent: OpponentKind::of_agent(kind),
+                ..Setup::load()
+            };
+            if let Err(error) = setup.save() {
+                self.report(tr_with!("error-remember-choices", error = error), cx);
+            }
         }
         if self.history.is_empty() {
             self.show_new_game(cx);
@@ -492,7 +503,19 @@ impl Chessdesk {
         cx.notify();
     }
 
+    /// Whether something covers the window: a dialog, the welcome, a menu or a choice to make.
+    fn overlay_open(&self) -> bool {
+        self.dialog.is_some()
+            || self.export.is_some()
+            || self.onboarding.is_some()
+            || self.confirm_delete.is_some()
+            || self.about_open
+            || self.context_menu.is_some()
+            || self.session().promotion.is_some()
+    }
+
     fn render_divider(
+        &self,
         id: &'static str,
         axis: Axis,
         drag: impl Fn(&MouseDownEvent, &Self) -> Dragging + 'static,
@@ -500,6 +523,10 @@ impl Chessdesk {
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let settings = Settings::get(cx);
+        // Its handle is drawn over everything, overlays too, so it goes while one is open.
+        if self.overlay_open() {
+            return ui::divider_line(axis, window, &settings);
+        }
         let on_press = cx.listener(move |this, event: &MouseDownEvent, _, cx| {
             this.dragging = Some(drag(event, this));
             cx.stop_propagation();
@@ -706,7 +733,7 @@ impl Chessdesk {
             }))
             .on_action(cx.listener(|this, _: &CloseOverlay, _, cx| {
                 if this.onboarding.is_some() {
-                    return this.finish_onboarding(cx);
+                    return this.finish_onboarding(None, cx);
                 }
                 let closed = this.dialog.take().is_some()
                     || this.export.take().is_some()

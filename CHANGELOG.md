@@ -3,6 +3,52 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.3.0 - 2026-11-08
+
+### Added
+
+- Reasoning effort can be changed during a game against an agent, from its next move on
+- Agents get a time limit for each move: 3 minutes on low effort, 8 on medium and 20 on high. One
+  that runs over pauses the game and says so in the error bar
+- In games against an agent, Hint offers Stockfish or any agent, as Analyze does. An agent's hint
+  says why
+
+### Changed
+
+- Release builds are named `arm64` and `x64` instead of `aarch64` and `x86_64`. Releases carry the
+  old names too, so older versions still find their update
+- An engine's Update button is on only when a newer release is out, which its row names
+- Take back is greyed out while the opponent or a hint is thinking
+
+### Fixed
+
+- The screenshots in the README showed a sliver of desktop at the window's sides
+
+## 2.2.0 - 2026-11-08
+
+### Added
+
+- The welcome has a second step: pick the agents you use and whether to get Stockfish (on by
+  default). Finish setup installs their adapters and Stockfish before it closes, and the first
+  game is against the first agent picked
+- Free models come first in a model list to type in, under Free, with the rest under Premium
+- Downloads and Stockfish analysis fill the loading bar as far as they've got
+- Models each agent offers are kept for a day, so New Game shows them at once; older lists show
+  too while they're asked for again in the background
+
+### Changed
+
+- Tutoring is on by default, and stays off once you turn it off for a game
+- Switches slide their knob across
+- The Install and Download buttons in New Game's notices start the install themselves, as well
+  as opening the settings page that shows it
+
+### Fixed
+
+- Castling written as `0-0` or `o-o` was read as no move, so a move named in the comment could
+  be played instead
+- Sidebar dividers lit up and could be dragged through an open dialog
+
 ## 2.1.0 - 2026-11-08
 
 ### Added

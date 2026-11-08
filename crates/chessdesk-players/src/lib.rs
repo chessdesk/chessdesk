@@ -12,6 +12,7 @@ pub mod update;
 
 use std::fmt;
 use std::ops::AddAssign;
+use std::time::Duration;
 
 use chessdesk_core::{Annotations, Game};
 use shakmaty::Move;
@@ -47,6 +48,8 @@ pub enum PlayerError {
     Process(String),
     /// The agent's replies held no legal move, even after being shown the legal ones.
     NoLegalMove { reply: String },
+    /// No reply within the time its effort allows.
+    TimedOut(Duration),
 }
 
 impl fmt::Display for PlayerError {
@@ -54,6 +57,9 @@ impl fmt::Display for PlayerError {
         match self {
             Self::Process(reason) => f.write_str(reason),
             Self::NoLegalMove { reply } => write!(f, "no legal move in the reply: {reply}"),
+            Self::TimedOut(limit) => {
+                write!(f, "no answer within {} minutes", limit.as_secs() / 60)
+            }
         }
     }
 }

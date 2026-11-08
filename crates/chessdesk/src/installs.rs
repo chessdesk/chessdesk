@@ -2,6 +2,7 @@
 //! this rather than the settings page that starts the work, so the work carries on, and shows,
 //! after the page closes.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -11,29 +12,69 @@ use chessdesk_core::plugins::Font;
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::update::{self, Release};
 use chessdesk_players::{adapters, download};
-use gpui::{App, AppContext, Context, Div, Entity, EventEmitter, SharedString, prelude::*};
+use gpui::{App, AppContext, Context, Div, Entity, EventEmitter, prelude::*};
 
 use crate::fonts;
 use crate::i18n::{tr, tr_with};
 use crate::settings::Settings;
-use crate::ui;
+use crate::setup::OpponentKind;
+use crate::ui::{self, Activity};
 
 /// How often a download's progress is looked at.
 const PROGRESS_TICK: Duration = Duration::from_millis(200);
 
 /// An engine that can be fetched.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Engine {
     Stockfish,
     Maia,
 }
 
 impl Engine {
+    const ALL: [Self; 2] = [Self::Stockfish, Self::Maia];
+
     fn name(self) -> &'static str {
         match self {
             Self::Stockfish => "Stockfish",
             Self::Maia => "Maia",
         }
+    }
+
+    /// The program whose release counts: for Maia, `lc0`. Its networks never change.
+    fn program(self) -> &'static str {
+        match self {
+            Self::Stockfish => "stockfish",
+            Self::Maia => "lc0",
+        }
+    }
+
+    fn latest(self) -> Result<String, String> {
+        match self {
+            Self::Stockfish => download::latest_stockfish(),
+            Self::Maia => download::latest_lc0(),
+        }
+    }
+}
+
+/// How an installed engine stands against its latest release.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineRelease {
+    /// Not asked yet, or asking failed.
+    Unknown,
+    Latest(String),
+    /// A newer one is out, or which one is here isn't known: installed by hand, or by a
+    /// Chessdesk before 2.3.0.
+    Newer(String),
+}
+
+/// Where `installed` stands against `latest`.
+fn compare(installed: Option<&str>, latest: Option<&str>) -> EngineRelease {
+    match (installed, latest) {
+        (_, None) => EngineRelease::Unknown,
+        (Some(installed), Some(latest)) if installed == latest => {
+            EngineRelease::Latest(latest.to_owned())
+        }
+        (_, Some(latest)) => EngineRelease::Newer(latest.to_owned()),
     }
 }
 
@@ -73,6 +114,9 @@ pub struct Installs {
     font: Option<(String, Progress)>,
     /// The agent whose adapter is being installed.
     installing: Option<AgentKind>,
+    /// Each engine's latest release, once asked for: once a run is enough.
+    latest_engines: HashMap<Engine, String>,
+    engines_checked: bool,
     app_update: AppUpdate,
 }
 
@@ -110,36 +154,70 @@ impl Installs {
         self.installing
     }
 
+    /// Where the installed `engine` stands against its latest release.
+    pub fn engine_release(&self, engine: Engine) -> EngineRelease {
+        let installed = Settings::engines_dir().and_then(|root| {
+            download::installed_release(&download::engine_folder(&root, engine.program()))
+        });
+        compare(
+            installed.as_deref(),
+            self.latest_engines.get(&engine).map(String::as_str),
+        )
+    }
+
+    /// Asks GitHub for each engine's latest release, once a run, quietly: without an answer
+    /// the update buttons just stay off.
+    pub fn check_engines(&mut self, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.engines_checked, true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async {
+                    Engine::ALL
+                        .into_iter()
+                        .filter_map(|engine| Some((engine, engine.latest().ok()?)))
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.latest_engines.extend(found);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn app_update(&self) -> &AppUpdate {
         &self.app_update
     }
 
     /// What's under way, for the title bar.
-    pub fn activity(&self) -> Option<SharedString> {
-        let percent = |done: Progress| (done * 100.).round() as u32;
-        if let Some((engine, done)) = self.downloading {
-            return Some(tr_with!(
+    pub fn activity(&self) -> Option<Activity> {
+        let downloading = |name: &str, done: Progress| {
+            let percent = (done * 100.).round() as u32;
+            Activity::new(tr_with!(
                 "activity-downloading",
-                name = engine.name(),
-                percent = percent(done)
-            ));
+                name = name,
+                percent = percent
+            ))
+            .with_progress(done)
+        };
+        if let Some((engine, done)) = self.downloading {
+            return Some(downloading(engine.name(), done));
         }
         if let AppUpdate::Downloading(release, done) = &self.app_update {
-            return Some(tr_with!(
-                "activity-downloading",
-                name = format!("Chessdesk {}", release.version),
-                percent = percent(*done)
+            return Some(downloading(
+                &format!("Chessdesk {}", release.version),
+                *done,
             ));
         }
         if let Some((family, done)) = &self.font {
-            return Some(tr_with!(
-                "activity-downloading",
-                name = family.as_str(),
-                percent = percent(*done)
-            ));
+            return Some(downloading(family, *done));
         }
         self.installing
-            .map(|kind| tr_with!("activity-installing", agent = kind.name()))
+            .map(|kind| Activity::new(tr_with!("activity-installing", agent = kind.name())))
     }
 
     /// Starts fetching an engine; the settings point at it once it's here.
@@ -166,6 +244,26 @@ impl Installs {
                 Ok(())
             },
         );
+    }
+
+    /// Starts fetching what `opponent` needs to play: its engine or its agent's adapter.
+    /// Nothing happens while one of the same kind is under way: one at a time.
+    pub fn fetch_for(&mut self, opponent: OpponentKind, cx: &mut Context<Self>) {
+        let engine = match opponent {
+            OpponentKind::Stockfish => Engine::Stockfish,
+            OpponentKind::Maia => Engine::Maia,
+            agent => {
+                if let Some(kind) = agent.agent()
+                    && self.installing.is_none()
+                {
+                    self.install_adapter(kind, cx);
+                }
+                return;
+            }
+        };
+        if self.downloading.is_none() {
+            self.download(engine, cx);
+        }
     }
 
     /// Starts fetching a language's font; it's the interface font once it's here.
@@ -410,5 +508,27 @@ fn store(key: &str, value: &str, cx: &mut Context<Installs>) {
         Err(error) => cx.emit(Event::Failed(
             tr_with!("error-save-setting", error = error).to_string(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_update_is_offered_only_for_a_newer_or_unknown_release() {
+        assert_eq!(
+            compare(Some("sf_19"), Some("sf_19")),
+            EngineRelease::Latest("sf_19".to_owned())
+        );
+        assert_eq!(
+            compare(Some("sf_18"), Some("sf_19")),
+            EngineRelease::Newer("sf_19".to_owned())
+        );
+        assert_eq!(
+            compare(None, Some("sf_19")),
+            EngineRelease::Newer("sf_19".to_owned())
+        );
+        assert_eq!(compare(Some("sf_19"), None), EngineRelease::Unknown);
     }
 }

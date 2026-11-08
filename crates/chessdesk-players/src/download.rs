@@ -18,6 +18,8 @@ const LC0_RELEASES: &str = "https://api.github.com/repos/LeelaChessZero/lc0/rele
 const MAIA_WEIGHTS: &str = "https://github.com/CSSLab/maia-chess/releases/download/v1.0";
 /// The networks there are, by the rating they imitate.
 pub const MAIA_LEVELS: [u32; 9] = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900];
+/// Beside an engine Chessdesk installed: the release it came from, to tell when there's a newer.
+const RELEASE_FILE: &str = "release.txt";
 /// GitHub's API turns away requests without one.
 const USER_AGENT: &str = "Chessdesk";
 const CHUNK: usize = 64 * 1024;
@@ -51,6 +53,7 @@ pub fn install_font(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> 
 
 #[derive(Debug, Deserialize)]
 struct Release {
+    tag_name: String,
     assets: Vec<Asset>,
 }
 
@@ -136,13 +139,33 @@ fn explain(url: &str, error: &ureq::Error) -> String {
     }
 }
 
-fn latest_assets(url: &str) -> Result<Vec<Asset>, String> {
+fn latest(url: &str) -> Result<Release, String> {
     let body = get(url)?
         .body_mut()
         .read_to_string()
         .map_err(|error| error.to_string())?;
-    let release: Release = serde_json::from_str(&body).map_err(|error| error.to_string())?;
-    Ok(release.assets)
+    serde_json::from_str(&body).map_err(|error| error.to_string())
+}
+
+/// The newest Stockfish release, such as `sf_18`.
+pub fn latest_stockfish() -> Result<String, String> {
+    latest(STOCKFISH_RELEASES).map(|release| release.tag_name)
+}
+
+/// The newest `lc0` release, such as `v0.32.1`.
+pub fn latest_lc0() -> Result<String, String> {
+    latest(LC0_RELEASES).map(|release| release.tag_name)
+}
+
+/// The release the engine in `folder` was installed from, if Chessdesk installed it.
+pub fn installed_release(folder: &Path) -> Option<String> {
+    let text = fs::read_to_string(folder.join(RELEASE_FILE)).ok()?;
+    Some(text.trim().to_owned()).filter(|tag| !tag.is_empty())
+}
+
+/// Where the engines are kept under `root`, by the name of their program.
+pub fn engine_folder(root: &Path, program: &str) -> PathBuf {
+    root.join(program)
 }
 
 /// Saves `url` to `target`, reporting the share done from 0 to 1 when the size is known.
@@ -218,30 +241,40 @@ fn is_program(path: &Path, prefix: &str) -> bool {
         }
 }
 
-/// Downloads an archive and unpacks it into `folder`, returning the program in it.
+/// Downloads the release's archive ending in `suffix`, unpacks it into `folder` and notes
+/// the release there, returning the program in it.
 fn install_archive(
-    asset: &Asset,
+    release: &Release,
+    suffix: &str,
     folder: &Path,
     program: &str,
     progress: &mut dyn FnMut(f32),
 ) -> Result<PathBuf, String> {
+    let asset = pick(&release.assets, suffix).ok_or("the release has no build for this machine")?;
     fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     let archive = folder.join(&asset.name);
     fetch(&asset.browser_download_url, &archive, progress)?;
     unpack(&archive, folder)?;
     fs::remove_file(&archive).map_err(|error| error.to_string())?;
-    find_program(folder, program)
+    let found = find_program(folder, program)
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("no {program} in {}", asset.name))
+        .ok_or_else(|| format!("no {program} in {}", asset.name))?;
+    fs::write(folder.join(RELEASE_FILE), &release.tag_name).map_err(|error| error.to_string())?;
+    Ok(found)
 }
 
 /// Installs the latest Stockfish under `root`, returning the program.
 pub fn install_stockfish(root: &Path, progress: &mut dyn FnMut(f32)) -> Result<PathBuf, String> {
     let suffix = stockfish_suffix(std::env::consts::OS, std::env::consts::ARCH)
         .ok_or("no Stockfish build for this machine")?;
-    let assets = latest_assets(STOCKFISH_RELEASES)?;
-    let asset = pick(&assets, suffix).ok_or("the release has no build for this machine")?;
-    install_archive(asset, &root.join("stockfish"), "stockfish", progress)
+    let release = latest(STOCKFISH_RELEASES)?;
+    install_archive(
+        &release,
+        suffix,
+        &engine_folder(root, "stockfish"),
+        "stockfish",
+        progress,
+    )
 }
 
 /// Installs `lc0` and the Maia networks under `root`, returning the program and the
@@ -251,12 +284,15 @@ pub fn install_maia(
     progress: &mut dyn FnMut(f32),
 ) -> Result<(PathBuf, PathBuf), String> {
     let suffix = lc0_suffix(std::env::consts::OS).ok_or("no lc0 build for this system")?;
-    let assets = latest_assets(LC0_RELEASES)?;
-    let asset = pick(&assets, suffix).ok_or("the release has no build for this system")?;
+    let release = latest(LC0_RELEASES)?;
     // The program is the larger part, so it gets half of the bar.
-    let lc0 = install_archive(asset, &root.join("lc0"), "lc0", &mut |done| {
-        progress(done / 2.);
-    })?;
+    let lc0 = install_archive(
+        &release,
+        suffix,
+        &engine_folder(root, "lc0"),
+        "lc0",
+        &mut |done| progress(done / 2.),
+    )?;
 
     let weights = root.join("maia");
     fs::create_dir_all(&weights).map_err(|error| error.to_string())?;
@@ -347,7 +383,20 @@ mod tests {
         let body = r#"{"tag_name":"sf_19","assets":[{"name":"a.zip",
             "browser_download_url":"https://example.com/a.zip","size":1}]}"#;
         let release: Release = serde_json::from_str(body).unwrap();
+        assert_eq!(release.tag_name, "sf_19");
         assert_eq!(release.assets, [asset("a.zip")]);
+    }
+
+    #[test]
+    fn an_engine_knows_the_release_it_came_from() {
+        let folder = std::env::temp_dir().join(format!("chessdesk-release-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).unwrap();
+        assert_eq!(installed_release(&folder), None);
+        fs::write(folder.join(RELEASE_FILE), "sf_19\n").unwrap();
+        let found = installed_release(&folder);
+        fs::remove_dir_all(&folder).unwrap();
+        assert_eq!(found.as_deref(), Some("sf_19"));
     }
 
     #[test]

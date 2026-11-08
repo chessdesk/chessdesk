@@ -8,6 +8,9 @@
 <p align="center"><b>Play chess against Claude Code, Codex and the other AI agents you already use.</b><br>
 Or against Stockfish and Maia. Free, open source, on your own machine.</p>
 
+<p align="center"><b><a href="https://github.com/chessdesk/chessdesk/releases/latest">Download for Windows, macOS and Linux</a></b><br>
+<a href="#download">What your system asks on the first start</a></p>
+
 **Chessdesk** is a desktop chess app for playing the AI agents you already use: Claude Code, Codex,
 Copilot, OpenCode and Pi. They play you, and if you want, they talk you through the game: what they
 think of your last move, what they're planning, and where you're about to lose a piece, with arrows
@@ -28,8 +31,8 @@ words: "Open with the London System", "Go easy on me", "Play like it's 1852".
 trained on human games, so it makes human mistakes.
 
 **Learn while you play.** Turn on tutoring mode and the agent comments as you go, or Stockfish rates
-each of your moves against an engine. Hint shows you a good move when you're stuck, and it costs no
-tokens.
+each of your moves against an engine. Hint shows you a good move when you're stuck: from Stockfish,
+which costs no tokens, or in a game against an agent from any agent, which says why.
 
 **Go back over your games.** Every game is saved as you play. Open one from the sidebar and press
 Analyze: an agent goes through your moves one by one and explains them, or Stockfish checks each
@@ -89,7 +92,9 @@ position. A move is about 1,000 tokens on Claude, most of it cached, and reviewi
 opponent's name to see what a game has used so far.
 
 If an agent can't come up with a legal move, it gets one more try with the legal moves spelled out.
-After that the game pauses and you decide. Chessdesk never makes up a move for it.
+After that the game pauses and you decide. Chessdesk never makes up a move for it. The same goes for
+an agent that takes too long: 3 minutes on low effort, 8 on medium and 20 on high. You can change the
+effort during a game, from the agent's next move on.
 
 ## Keys
 

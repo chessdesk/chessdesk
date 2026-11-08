@@ -25,8 +25,8 @@ CI runs fmt, clippy and the tests on Linux and macOS. Windows is covered by the 
 
 Every push to `main` runs [release.yml](../.github/workflows/release.yml) once CI passes, but it only
 builds when the workspace version in `Cargo.toml` has no `v<version>` release yet. Then it builds
-with the `dist` profile for Windows (x86_64, ARM64), macOS (one universal `Chessdesk.app`) and
-Linux (x86_64, ARM64, built on Ubuntu 22.04 for an old enough glibc).
+with the `dist` profile for Windows (x64, ARM64), macOS (one universal `Chessdesk.app`) and
+Linux (x64, ARM64, built on Ubuntu 22.04 for an old enough glibc).
 
 Before anything is published, the macOS app is started on an Apple Silicon and an Intel runner, and
 the Linux builds under Xvfb with a software GPU, by [smoke-test.sh](../.github/smoke-test.sh). It
