@@ -147,6 +147,8 @@ pub struct Chessdesk {
     open_menu: Option<usize>,
     /// Which button's choices of Stockfish or an agent are open: Analyze's or Hint's.
     helper_menu: Option<panel::HelperMenu>,
+    /// Whether the list of efforts is open, in a game against an agent.
+    effort_menu: bool,
     /// The game whose row was right-clicked, and where.
     context_menu: Option<(Entry, Point<Pixels>)>,
     /// The game waiting for a yes before it's deleted.
@@ -215,6 +217,7 @@ impl Chessdesk {
             likelihood: Motion::new(Instant::now()),
             open_menu: None,
             helper_menu: None,
+            effort_menu: false,
             context_menu: None,
             confirm_delete: None,
             renaming: None,
