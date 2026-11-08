@@ -83,13 +83,6 @@ impl OpponentKind {
     }
 
     /// Models to pick from; the first is the cheap default. Empty leaves it to the agent.
-    pub fn models(self) -> &'static [&'static str] {
-        match self {
-            Self::ClaudeCode => &["haiku", "sonnet", "opus"],
-            _ => &[],
-        }
-    }
-
     /// Why this opponent can't play on this machine, if so.
     pub fn missing(self, settings: &Settings) -> Option<String> {
         if let Some(kind) = self.agent() {
@@ -136,7 +129,10 @@ pub fn title_case(text: &str) -> String {
 pub struct Setup {
     pub side: Side,
     pub opponent: OpponentKind,
+    /// As the agent knows it; `None` is the agent's own default.
     pub model: Option<String>,
+    /// The model as the agent names it, the default's too, to show who plays.
+    pub model_name: Option<String>,
     pub effort: Effort,
     /// The player's own words to an agent on how to play.
     pub instructions: String,
@@ -160,6 +156,7 @@ impl Default for Setup {
             side: Side::White,
             opponent: OpponentKind::Stockfish,
             model: None,
+            model_name: None,
             effort: Effort::default(),
             instructions: String::new(),
             stockfish_elo: Some(1500),
@@ -235,10 +232,16 @@ impl Setup {
                 None => "Stockfish".to_owned(),
             },
             OpponentKind::Maia => format!("Maia ~{}", maia_strength(self.maia_level)),
-            kind => match &self.model {
-                Some(model) => format!("{} {}", kind.name(), title_case(model)),
-                None => kind.name().to_owned(),
-            },
+            kind => {
+                let model = self
+                    .model_name
+                    .clone()
+                    .or_else(|| self.model.as_deref().map(title_case));
+                match model {
+                    Some(model) => format!("{} ({model})", kind.name()),
+                    None => kind.name().to_owned(),
+                }
+            }
         }
     }
 
@@ -335,12 +338,22 @@ mod tests {
 
     #[test]
     fn model_names_read_as_names() {
-        let setup = Setup {
+        let saved = Setup {
             opponent: OpponentKind::ClaudeCode,
             model: Some("haiku".to_owned()),
             ..Setup::default()
         };
-        assert_eq!(setup.opponent_name(), "Claude Code Haiku");
+        assert_eq!(saved.opponent_name(), "Claude Code (Haiku)");
+        let named = Setup {
+            model_name: Some("Haiku 5.5".to_owned()),
+            ..saved
+        };
+        assert_eq!(named.opponent_name(), "Claude Code (Haiku 5.5)");
+        let default = Setup {
+            model: None,
+            ..named
+        };
+        assert_eq!(default.opponent_name(), "Claude Code (Haiku 5.5)");
     }
 
     #[test]

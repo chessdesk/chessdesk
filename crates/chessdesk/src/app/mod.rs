@@ -29,6 +29,7 @@ use crate::export::{self, ExportDialog};
 use crate::i18n::{tr, tr_with};
 use crate::installs::{self, Installs};
 use crate::library::{self, Entry};
+use crate::models::Catalog;
 use crate::new_game::{self, NewGame};
 use crate::onboarding::{self, Onboarding};
 use crate::settings::Settings;
@@ -164,6 +165,8 @@ pub struct Chessdesk {
     trace_copied: Option<Instant>,
     /// Engines and adapters being fetched, and what listens to them: redraws and events.
     installs: (Entity<Installs>, [Subscription; 2]),
+    /// The models each agent offers, and the redraws while it's asked.
+    catalog: (Entity<Catalog>, Subscription),
 }
 
 impl Chessdesk {
@@ -172,6 +175,8 @@ impl Chessdesk {
         focus.focus(window);
         watch_settings(cx);
         let settings = Settings::get(cx);
+        let catalog = cx.new(|_| Catalog::default());
+        let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
         let installs = cx.new(|_| Installs::default());
         let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
         let events = cx.subscribe(&installs, |this, _, event, cx| match event {
@@ -213,6 +218,7 @@ impl Chessdesk {
             trace: Trace::new(),
             trace_copied: None,
             installs: (installs, [redraw, events]),
+            catalog: (catalog, catalog_changes),
         };
         for error in errors {
             this.trace.record(&error);
@@ -302,7 +308,7 @@ impl Chessdesk {
     }
 
     fn show_new_game(&mut self, cx: &mut Context<Self>) {
-        let dialog = new_game::dialog(Setup::load(), cx);
+        let dialog = new_game::dialog(Setup::load(), self.catalog.0.clone(), cx);
         let subscription = cx.subscribe(&dialog, |this, _, event, cx| {
             this.dialog = None;
             match event {

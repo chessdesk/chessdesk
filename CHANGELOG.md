@@ -3,6 +3,21 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 1.8.0 - 2026-11-08
+
+### Added
+
+- Every agent's own models in New Game, asked from the agent (no tokens), with its default first
+  and named. More than five, or none listed as for Copilot, get a list to type in
+- The model playing shows next to the agent's name, the default's too
+
+### Changed
+
+- The chosen model is set over ACP for all agents but Copilot, which still takes `--model`
+- The opponent list drops "(not installed)", which the card below it already says, and marks
+  OpenCode as having free options
+- Opening a list in New Game closes the one already open
+
 ## 1.7.1 - 2026-11-08
 
 ### Fixed

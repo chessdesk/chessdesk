@@ -65,6 +65,7 @@ activity-reviewing = { $agent } is reviewing the game
 activity-analyzing = Analyzing with Stockfish, move { $done } of { $all }
 activity-downloading = Downloading { $name }, { $percent }%
 activity-installing = Installing the { $agent } adapter
+activity-asking-models = Asking { $agent } for its models
 
 ## Game history
 
@@ -119,7 +120,7 @@ instructions-example = Open with the London System. Go easy on me.
 ## New game
 
 opponent = Opponent
-not-installed = { $name } (not installed)
+free-options = Free options
 install-in-settings = Install in Settings
 download-in-settings = Download in Settings
 strength = Strength
@@ -128,6 +129,10 @@ engine-elo = { $elo } engine Elo
 maia-strength = Plays around { $rating } on Lichess
 model = Model
 model-hint = Cheaper models use fewer credits
+model-default = Default ({ $model })
+model-agent-default = The agent's default
+models-asking = Asking for models…
+models-unknown = Could not ask for its models: { $error }
 reasoning-effort = Reasoning effort
 effort-value = { $effort }. Higher costs more tokens
 effort-low = Low

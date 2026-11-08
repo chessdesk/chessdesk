@@ -71,4 +71,5 @@ Try the app without an engine, or check a real agent, which spends real tokens:
 ```powershell
 cargo build -p chessdesk-players --example fake_uci   # then point `stockfish` at it
 cargo run -p chessdesk-players --example agent_smoke -- claude haiku
+cargo run -p chessdesk-players --example agent_models   # the models each agent offers, no tokens
 ```

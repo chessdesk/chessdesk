@@ -16,6 +16,7 @@ fluent-bundle = "0.16.0"
 gpui = "0.2.2"
 jiff = "0.2"
 notify = "8"
+nucleo-matcher = "0.3"
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "vorbis", "wav"] }
 serde.workspace = true
 shakmaty.workspace = true

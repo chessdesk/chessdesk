@@ -63,6 +63,7 @@ activity-reviewing = { $agent } commente la partie
 activity-analyzing = Analyse avec Stockfish, coup { $done } sur { $all }
 activity-downloading = Téléchargement de { $name }, { $percent } %
 activity-installing = Installation de l'adaptateur { $agent }
+activity-asking-models = { $agent } est interrogé sur ses modèles
 
 ## Game history
 
@@ -117,7 +118,7 @@ instructions-example = Ouvre avec le système de Londres. Sois indulgent avec mo
 ## New game
 
 opponent = Adversaire
-not-installed = { $name } (non installé)
+free-options = Options gratuites
 install-in-settings = Installer dans les réglages
 download-in-settings = Télécharger dans les réglages
 strength = Niveau
@@ -126,6 +127,10 @@ engine-elo = { $elo } Elo moteur
 maia-strength = Joue environ { $rating } sur Lichess
 model = Modèle
 model-hint = Les modèles moins chers utilisent moins de crédits
+model-default = Par défaut ({ $model })
+model-agent-default = Celui de l'agent par défaut
+models-asking = Recherche des modèles…
+models-unknown = Impossible de connaître ses modèles : { $error }
 reasoning-effort = Effort de réflexion
 effort-value = { $effort }. Plus il est élevé, plus il coûte de jetons
 effort-low = Faible

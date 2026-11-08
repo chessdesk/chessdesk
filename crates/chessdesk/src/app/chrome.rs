@@ -265,7 +265,7 @@ impl Chessdesk {
     }
 
     /// What takes a while right now: in the game on show first, then in the others, then
-    /// what's being installed.
+    /// what's being installed, then agents asked for their models.
     fn activity(&self, cx: &App) -> Option<SharedString> {
         let mut others = self
             .sessions
@@ -275,6 +275,7 @@ impl Chessdesk {
             .activity()
             .or_else(|| others.find_map(Session::activity))
             .or_else(|| self.installs.0.read(cx).activity())
+            .or_else(|| self.catalog.0.read(cx).activity())
     }
 
     /// The logo, the name and what's behind them: all of it one button.

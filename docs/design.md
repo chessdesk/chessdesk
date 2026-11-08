@@ -42,6 +42,17 @@ on each move.
 Reviewing a game of 8 half-moves with `sonnet` took 1,561 tokens in one call. Longer games cost
 more: the whole PGN goes in, and a comment comes back for each of the player's moves.
 
+## Models
+
+Chessdesk keeps no list of models. An agent names its models and its default when a session
+starts, as the ACP session setting in the `model` category; New Game asks for that once per run
+(opening a session costs no tokens) and sets the chosen model with `session/set_config_option`.
+Measured on 2026-11-08: Claude Code offers 13, OpenCode 44, Pi several hundred through
+OpenRouter. More than five get a list to type in.
+
+Copilot offers none over ACP. Its default comes from `~/.copilot/settings.json` (`auto` without
+one), and a model typed in New Game goes to it as `--model`.
+
 ## Strength labels
 
 Stockfish's `UCI_Elo` is on an engine scale, anchored to CCRL 40/4 and calibrated at 60 s + 0.6 s, so

@@ -4,17 +4,19 @@
 use std::rc::Rc;
 
 use chessdesk_core::Game;
-use chessdesk_players::acp::Effort;
+use chessdesk_players::acp::{AgentKind, Effort, Models};
 use chessdesk_players::download::MAIA_LEVELS;
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, MouseButton, Pixels, SharedString, Window, div,
-    prelude::*, px,
+    AnyElement, App, Context, Entity, EventEmitter, MouseButton, Pixels, SharedString,
+    Subscription, Window, div, prelude::*, px,
 };
 
+use crate::combobox::{self, Combobox};
 use crate::i18n::{tr, tr_with};
+use crate::models::{Catalog, Offer};
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
-use crate::setup::{OpponentKind, Setup, Side, maia_strength, title_case};
+use crate::setup::{OpponentKind, Setup, Side, maia_strength};
 use crate::text_area::TextArea;
 use crate::ui::{self, Logo};
 
@@ -37,6 +39,8 @@ pub enum Event {
 struct Choice {
     label: SharedString,
     logo: Option<Logo>,
+    /// A word on the choice, quieter, at the row's end.
+    note: Option<SharedString>,
     pick: Rc<dyn Fn(&mut Setup)>,
 }
 
@@ -44,6 +48,7 @@ fn choice(label: impl Into<SharedString>, pick: impl Fn(&mut Setup) + 'static) -
     Choice {
         label: label.into(),
         logo: None,
+        note: None,
         pick: Rc::new(pick),
     }
 }
@@ -79,9 +84,50 @@ pub struct NewGame {
     instructions: Entity<TextArea>,
     open: Option<&'static str>,
     error: Option<SharedString>,
+    /// What each agent offers, asked for when it's picked.
+    catalog: Entity<Catalog>,
+    /// The model list to type in, while it's open.
+    combobox: Option<(Entity<Combobox>, Subscription)>,
+    _catalog_changes: Subscription,
 }
 
 impl EventEmitter<Event> for NewGame {}
+
+/// A model to pick: what it shows as, and what it's asked for by, `None` being the agent's
+/// own default.
+type ModelEntry = (SharedString, Option<String>);
+
+/// Longer lists than this get a field to type in, to narrow them.
+const MAX_PLAIN_MODELS: usize = 5;
+
+/// The models `offer` has to pick from, the agent's default first. `chosen` joins them if
+/// it's not among them: typed, or remembered from before.
+fn model_entries(offer: Option<&Models>, chosen: Option<&str>) -> Vec<ModelEntry> {
+    let default = offer.map(|models| {
+        models
+            .find(&models.current)
+            .map_or(models.current.as_str(), |model| model.name.as_str())
+    });
+    let mut entries: Vec<ModelEntry> = vec![(
+        default.map_or_else(
+            || tr("model-agent-default"),
+            |name| tr_with!("model-default", model = name),
+        ),
+        None,
+    )];
+    entries.extend(offer.into_iter().flat_map(|models| {
+        models
+            .choices
+            .iter()
+            .map(|model| (model.name.clone().into(), Some(model.id.clone())))
+    }));
+    if let Some(chosen) = chosen
+        && !entries.iter().any(|(_, id)| id.as_deref() == Some(chosen))
+    {
+        entries.push((chosen.to_owned().into(), Some(chosen.to_owned())));
+    }
+    entries
+}
 
 fn side_label(side: Side) -> SharedString {
     tr(match side {
@@ -133,14 +179,120 @@ fn nearest_stop(levels: &[u32], level: u32) -> usize {
 }
 
 impl NewGame {
-    pub fn new(setup: Setup, cx: &mut Context<Self>) -> Self {
+    pub fn new(setup: Setup, catalog: Entity<Catalog>, cx: &mut Context<Self>) -> Self {
         let text = setup.instructions.clone();
-        Self {
+        let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
+        let mut dialog = Self {
             setup,
             instructions: cx.new(|cx| TextArea::new(text, tr("instructions-example"), cx)),
             open: None,
             error: None,
+            catalog,
+            combobox: None,
+            _catalog_changes: catalog_changes,
+        };
+        dialog.ask_for_models(cx);
+        dialog
+    }
+
+    /// Asks the agent picked which models it offers, if that's not known yet.
+    fn ask_for_models(&mut self, cx: &mut Context<Self>) {
+        if let Some(kind) = self.setup.opponent.agent() {
+            self.catalog.update(cx, |catalog, cx| catalog.ask(kind, cx));
         }
+    }
+
+    /// The agent's models to pick from: a select, or for a long list or none at all, one
+    /// to type in.
+    fn model_row(&self, kind: AgentKind, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let settings = Settings::get(cx);
+        let catalog = self.catalog.read(cx);
+        let mut hint = tr("model-hint");
+        let models = match catalog.offer(kind) {
+            None | Some(Offer::Asking) => {
+                let asking =
+                    ui::select_button("model", tr("models-asking"), None, false, &settings)
+                        .cursor_default();
+                return ui::setting_row(tr("model"), Some(hint), &settings)
+                    .child(asking)
+                    .into_any_element();
+            }
+            Some(Offer::Failed(error)) => {
+                hint = tr_with!("models-unknown", error = error.as_str());
+                None
+            }
+            Some(Offer::Known(models)) => models.clone(),
+        };
+        let entries = model_entries(models.as_ref(), self.setup.model.as_deref());
+        let current = entries
+            .iter()
+            .position(|(_, id)| *id == self.setup.model)
+            .unwrap_or(0);
+        if let Some((combobox, _)) = &self.combobox {
+            return ui::setting_row(tr("model"), Some(hint), &settings)
+                .child(combobox.clone())
+                .into_any_element();
+        }
+        let listed = models.as_ref().map_or(0, |models| models.choices.len());
+        let typed = models.is_some() && (listed > MAX_PLAIN_MODELS || listed == 0);
+        if typed {
+            let label = entries[current].0.clone();
+            let button = ui::select_button("model", label, None, false, &settings).on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.open_combobox(entries.clone(), current, window, cx);
+                }),
+            );
+            return ui::setting_row(tr("model"), Some(hint), &settings)
+                .child(button)
+                .into_any_element();
+        }
+        let label = entries[current].0.clone();
+        let choices = entries
+            .into_iter()
+            .map(|(label, id)| {
+                let name = label.to_string();
+                choice(label, move |setup| {
+                    setup.model.clone_from(&id);
+                    setup.model_name = id.is_some().then(|| name.clone());
+                })
+            })
+            .collect();
+        let field = Field {
+            hint: Some(hint),
+            ..field("model", "model")
+        };
+        self.select(field, label, choices, window, cx)
+    }
+
+    fn open_combobox(
+        &mut self,
+        entries: Vec<ModelEntry>,
+        current: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let labels = entries.iter().map(|(label, _)| label.clone()).collect();
+        let combobox = cx.new(|cx| Combobox::new(current, labels, window, cx));
+        let subscription = cx.subscribe(&combobox, move |this, _, event, cx| {
+            match event {
+                combobox::Event::Picked(place) => {
+                    let (label, id) = entries[*place].clone();
+                    this.setup.model_name = id.is_some().then(|| label.to_string());
+                    this.setup.model = id;
+                }
+                combobox::Event::Typed(model) => {
+                    this.setup.model = Some(model.clone());
+                    this.setup.model_name = Some(model.clone());
+                }
+                combobox::Event::Dismissed => {}
+            }
+            this.combobox = None;
+            cx.notify();
+        });
+        self.open = None;
+        self.combobox = Some((combobox, subscription));
+        cx.notify();
     }
 
     fn select(
@@ -163,6 +315,9 @@ impl NewGame {
             MouseButton::Left,
             cx.listener(move |this, _, _, cx| {
                 this.open = (!is_open).then_some(id);
+                // One list open at a time: the field of a list to type in keeps the focus, so
+                // nothing else would close it.
+                this.combobox = None;
                 cx.notify();
             }),
         );
@@ -179,11 +334,18 @@ impl NewGame {
                             settings.colors.text,
                         )
                     }))
-                    .child(div().truncate().child(choice.label))
+                    .child(div().flex_1().min_w_0().truncate().child(choice.label))
+                    .children(choice.note.map(|note| {
+                        div()
+                            .flex_none()
+                            .text_color(settings.colors.muted)
+                            .child(note)
+                    }))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         pick(&mut this.setup);
                         this.open = None;
                         this.error = None;
+                        this.ask_for_models(cx);
                         cx.notify();
                     }))
             });
@@ -255,20 +417,19 @@ impl NewGame {
             .into_any_element()
     }
 
-    fn opponent_choices(settings: &Settings) -> Vec<Choice> {
+    fn opponent_choices() -> Vec<Choice> {
         OpponentKind::ALL
             .into_iter()
             .map(|kind| {
-                let label = if kind.missing(settings).is_some() {
-                    tr_with!("not-installed", name = kind.name())
-                } else {
-                    kind.name().into()
-                };
+                // OpenCode comes with models that cost nothing, which is worth knowing here.
+                let note = (kind == OpponentKind::OpenCode).then(|| tr("free-options"));
                 Choice {
                     logo: logo_of(kind),
-                    ..choice(label, move |setup| {
+                    note,
+                    ..choice(kind.name(), move |setup| {
                         setup.opponent = kind;
-                        setup.model = kind.models().first().map(ToString::to_string);
+                        setup.model = None;
+                        setup.model_name = None;
                     })
                 }
             })
@@ -338,26 +499,7 @@ impl NewGame {
                     cx,
                 ))
             }
-            kind => {
-                let models = kind.models();
-                if models.is_empty() {
-                    return None;
-                }
-                let choices = models
-                    .iter()
-                    .map(|model| {
-                        choice(title_case(model), move |setup| {
-                            setup.model = Some((*model).to_owned());
-                        })
-                    })
-                    .collect();
-                let current = setup.model.as_deref().unwrap_or(models[0]);
-                let model = Field {
-                    hint: Some(tr("model-hint")),
-                    ..field("model", "model")
-                };
-                Some(self.select(model, title_case(current).into(), choices, window, cx))
-            }
+            kind => Some(self.model_row(kind.agent()?, window, cx)),
         }
     }
 
@@ -395,7 +537,6 @@ impl NewGame {
 
     /// Everything to choose, top to bottom.
     fn rows(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let settings = Settings::get(cx);
         let setup = self.setup.clone();
         let is_agent = setup.opponent.agent().is_some();
         let mut rows = vec![self.select(
@@ -404,7 +545,7 @@ impl NewGame {
                 ..field("opponent", "opponent")
             },
             setup.opponent.name().into(),
-            Self::opponent_choices(&settings),
+            Self::opponent_choices(),
             window,
             cx,
         )];
@@ -548,6 +689,15 @@ impl NewGame {
                         .text()
                         .trim()
                         .clone_into(&mut setup.instructions);
+                    // The default's name too, so that the game says who plays.
+                    if let Some(kind) = setup.opponent.agent()
+                        && let Some(name) = this
+                            .catalog
+                            .read(cx)
+                            .model_name(kind, setup.model.as_deref())
+                    {
+                        setup.model_name = Some(name);
+                    }
                     cx.emit(Event::Start(setup));
                 },
             ))
@@ -598,13 +748,32 @@ impl Render for NewGame {
 }
 
 /// Opens the dialog as a view.
-pub fn dialog(setup: Setup, cx: &mut App) -> Entity<NewGame> {
-    cx.new(|cx| NewGame::new(setup, cx))
+pub fn dialog(setup: Setup, catalog: Entity<Catalog>, cx: &mut App) -> Entity<NewGame> {
+    cx.new(|cx| NewGame::new(setup, catalog, cx))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agents_default_comes_first_and_a_typed_model_stays() {
+        use chessdesk_players::acp::Model;
+        let models = Models {
+            option: Some("model".to_owned()),
+            current: "opus".to_owned(),
+            choices: vec![Model {
+                id: "opus".to_owned(),
+                name: "Opus 5.5".to_owned(),
+                description: None,
+            }],
+        };
+        let entries = model_entries(Some(&models), Some("my-model"));
+        let ids: Vec<_> = entries.iter().map(|(_, id)| id.as_deref()).collect();
+        assert_eq!(ids, [None, Some("opus"), Some("my-model")]);
+        assert_eq!(entries[0].0, "Default (Opus 5.5)");
+        assert_eq!(model_entries(None, None)[0].0, "The agent's default");
+    }
 
     #[test]
     fn labels_read_naturally() {

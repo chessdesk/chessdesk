@@ -61,6 +61,7 @@ activity-reviewing = { $agent } 正在复盘
 activity-analyzing = Stockfish 正在分析，第 { $done } / { $all } 步
 activity-downloading = 正在下载 { $name }，{ $percent }%
 activity-installing = 正在安装 { $agent } 适配器
+activity-asking-models = 正在询问 { $agent } 有哪些模型
 
 ## Game history
 
@@ -111,7 +112,7 @@ instructions-example = 用伦敦体系开局。手下留情。
 ## New game
 
 opponent = 对手
-not-installed = { $name }（未安装）
+free-options = 有免费选项
 install-in-settings = 在设置中安装
 download-in-settings = 在设置中下载
 strength = 棋力
@@ -120,6 +121,10 @@ engine-elo = 引擎 Elo { $elo }
 maia-strength = 在 Lichess 上约 { $rating } 分
 model = 模型
 model-hint = 便宜的模型消耗更少额度
+model-default = 默认（{ $model }）
+model-agent-default = 智能体的默认模型
+models-asking = 正在获取模型…
+models-unknown = 无法获取模型：{ $error }
 reasoning-effort = 推理强度
 effort-value = { $effort }。越高消耗的 token 越多
 effort-low = 低

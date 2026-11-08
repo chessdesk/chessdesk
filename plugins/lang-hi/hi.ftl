@@ -61,6 +61,7 @@ activity-reviewing = { $agent } खेल की समीक्षा कर �
 activity-analyzing = Stockfish से विश्लेषण, चाल { $done } / { $all }
 activity-downloading = { $name } डाउनलोड हो रहा है, { $percent }%
 activity-installing = { $agent } एडैप्टर इंस्टॉल हो रहा है
+activity-asking-models = { $agent } से उसके मॉडल पूछे जा रहे हैं
 
 ## Game history
 
@@ -115,7 +116,7 @@ instructions-example = लंदन सिस्टम से शुरुआत
 ## New game
 
 opponent = प्रतिद्वंद्वी
-not-installed = { $name } (इंस्टॉल नहीं है)
+free-options = मुफ़्त विकल्प
 install-in-settings = सेटिंग्स में इंस्टॉल करें
 download-in-settings = सेटिंग्स में डाउनलोड करें
 strength = ताक़त
@@ -124,6 +125,10 @@ engine-elo = इंजन Elo { $elo }
 maia-strength = Lichess पर लगभग { $rating } के स्तर पर खेलता है
 model = मॉडल
 model-hint = सस्ते मॉडल कम क्रेडिट लेते हैं
+model-default = डिफ़ॉल्ट ({ $model })
+model-agent-default = एजेंट का डिफ़ॉल्ट
+models-asking = मॉडल पूछे जा रहे हैं…
+models-unknown = इसके मॉडल पूछे नहीं जा सके: { $error }
 reasoning-effort = सोचने का स्तर
 effort-value = { $effort }। ज़्यादा स्तर पर ज़्यादा टोकन लगते हैं
 effort-low = कम

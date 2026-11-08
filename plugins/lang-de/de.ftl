@@ -63,6 +63,7 @@ activity-reviewing = { $agent } kommentiert die Partie
 activity-analyzing = Analyse mit Stockfish, Zug { $done } von { $all }
 activity-downloading = { $name } wird heruntergeladen, { $percent } %
 activity-installing = Der Adapter für { $agent } wird installiert
+activity-asking-models = { $agent } wird nach seinen Modellen gefragt
 
 ## Game history
 
@@ -117,7 +118,7 @@ instructions-example = Eröffne mit dem Londoner System. Sei nachsichtig mit mir
 ## New game
 
 opponent = Gegner
-not-installed = { $name } (nicht installiert)
+free-options = Kostenlose Modelle
 install-in-settings = In den Einstellungen installieren
 download-in-settings = In den Einstellungen herunterladen
 strength = Spielstärke
@@ -126,6 +127,10 @@ engine-elo = { $elo } Engine-Elo
 maia-strength = Spielt etwa wie { $rating } auf Lichess
 model = Modell
 model-hint = Günstigere Modelle verbrauchen weniger Guthaben
+model-default = Standard ({ $model })
+model-agent-default = Standard des Agenten
+models-asking = Modelle werden abgefragt…
+models-unknown = Modelle nicht abrufbar: { $error }
 reasoning-effort = Denkaufwand
 effort-value = { $effort }. Mehr kostet mehr Tokens
 effort-low = Niedrig
