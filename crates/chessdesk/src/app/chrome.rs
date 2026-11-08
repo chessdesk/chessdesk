@@ -22,6 +22,7 @@ use crate::installs::AppUpdate;
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
 use crate::trace;
+use crate::ui::Activity;
 use crate::ui::{self, Icon};
 
 /// From the top of a menu label to its dropdown.
@@ -221,7 +222,7 @@ fn window_controls(settings: &Settings, maximized: bool) -> Div {
 
 impl Chessdesk {
     /// The row across the top of the window: the logo, the menu and the window controls.
-    pub(super) fn render_top_bar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_top_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
         let line = div()
             .flex_none()
@@ -249,12 +250,14 @@ impl Chessdesk {
 
         // The only draggable part: anything over it would swallow clicks on Windows. The
         // loading bar inside takes no clicks, so the window drags by it too.
-        let loading = self.activity(cx).map(|status| {
+        let loading = self.activity(cx).map(|activity| {
             div()
                 .flex_1()
                 .max_w(LOADING_BAR_WIDTH)
                 .h_full()
-                .child(ui::loading_bar("activity", status, &settings))
+                .child(ui::loading_bar(
+                    "activity", &activity, &settings, window, cx,
+                ))
         });
         bar = bar.child(
             div()
@@ -297,7 +300,7 @@ impl Chessdesk {
 
     /// What takes a while right now: in the game on show first, then in the others, then
     /// what's being installed, then agents asked for their models.
-    fn activity(&self, cx: &App) -> Option<SharedString> {
+    fn activity(&self, cx: &App) -> Option<Activity> {
         let mut others = self
             .sessions
             .iter()

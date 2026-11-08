@@ -11,12 +11,13 @@ use chessdesk_core::plugins::Font;
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::update::{self, Release};
 use chessdesk_players::{adapters, download};
-use gpui::{App, AppContext, Context, Div, Entity, EventEmitter, SharedString, prelude::*};
+use gpui::{App, AppContext, Context, Div, Entity, EventEmitter, prelude::*};
 
 use crate::fonts;
 use crate::i18n::{tr, tr_with};
 use crate::settings::Settings;
-use crate::ui;
+use crate::setup::OpponentKind;
+use crate::ui::{self, Activity};
 
 /// How often a download's progress is looked at.
 const PROGRESS_TICK: Duration = Duration::from_millis(200);
@@ -115,31 +116,30 @@ impl Installs {
     }
 
     /// What's under way, for the title bar.
-    pub fn activity(&self) -> Option<SharedString> {
-        let percent = |done: Progress| (done * 100.).round() as u32;
-        if let Some((engine, done)) = self.downloading {
-            return Some(tr_with!(
+    pub fn activity(&self) -> Option<Activity> {
+        let downloading = |name: &str, done: Progress| {
+            let percent = (done * 100.).round() as u32;
+            Activity::new(tr_with!(
                 "activity-downloading",
-                name = engine.name(),
-                percent = percent(done)
-            ));
+                name = name,
+                percent = percent
+            ))
+            .with_progress(done)
+        };
+        if let Some((engine, done)) = self.downloading {
+            return Some(downloading(engine.name(), done));
         }
         if let AppUpdate::Downloading(release, done) = &self.app_update {
-            return Some(tr_with!(
-                "activity-downloading",
-                name = format!("Chessdesk {}", release.version),
-                percent = percent(*done)
+            return Some(downloading(
+                &format!("Chessdesk {}", release.version),
+                *done,
             ));
         }
         if let Some((family, done)) = &self.font {
-            return Some(tr_with!(
-                "activity-downloading",
-                name = family.as_str(),
-                percent = percent(*done)
-            ));
+            return Some(downloading(family, *done));
         }
         self.installing
-            .map(|kind| tr_with!("activity-installing", agent = kind.name()))
+            .map(|kind| Activity::new(tr_with!("activity-installing", agent = kind.name())))
     }
 
     /// Starts fetching an engine; the settings point at it once it's here.
@@ -166,6 +166,26 @@ impl Installs {
                 Ok(())
             },
         );
+    }
+
+    /// Starts fetching what `opponent` needs to play: its engine or its agent's adapter.
+    /// Nothing happens while one of the same kind is under way: one at a time.
+    pub fn fetch_for(&mut self, opponent: OpponentKind, cx: &mut Context<Self>) {
+        let engine = match opponent {
+            OpponentKind::Stockfish => Engine::Stockfish,
+            OpponentKind::Maia => Engine::Maia,
+            agent => {
+                if let Some(kind) = agent.agent()
+                    && self.installing.is_none()
+                {
+                    self.install_adapter(kind, cx);
+                }
+                return;
+            }
+        };
+        if self.downloading.is_none() {
+            self.download(engine, cx);
+        }
     }
 
     /// Starts fetching a language's font; it's the interface font once it's here.

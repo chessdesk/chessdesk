@@ -217,7 +217,7 @@ fn process(config: &AgentConfig) -> Result<AcpAgent, agent_client_protocol::Erro
 }
 
 /// A model an agent offers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Model {
     /// What the agent knows it by, to ask for it.
     pub id: String,
@@ -227,7 +227,7 @@ pub struct Model {
 }
 
 /// The models an agent offers, as it says when a session starts.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Models {
     /// The session setting they're the choices of. `None` for an agent that takes its model
     /// only on its command line, and lists none.

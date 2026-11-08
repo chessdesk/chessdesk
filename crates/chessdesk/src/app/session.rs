@@ -19,6 +19,7 @@ use crate::board::{Slide, slide_paths};
 use crate::i18n::{tr, tr_with};
 use crate::setup::{OpponentPlan, Setup};
 use crate::text_area::TextArea;
+use crate::ui::Activity;
 
 /// An even game, before anything has happened.
 pub const EVEN: Wdl = Wdl {
@@ -158,16 +159,23 @@ impl Session {
     /// Who the player faces: the engine or the agent and its model.
     /// What takes a while in this game, for the title bar: an agent at work, or a review.
     /// Engines answer too quickly for it to be worth showing.
-    pub fn activity(&self) -> Option<SharedString> {
+    pub fn activity(&self) -> Option<Activity> {
         if let Some(kind) = self.reviewer {
-            return Some(tr_with!("activity-reviewing", agent = kind.name()));
+            return Some(Activity::new(tr_with!(
+                "activity-reviewing",
+                agent = kind.name()
+            )));
         }
         if let Some((done, all)) = self.analysis {
-            return Some(tr_with!("activity-analyzing", done = done, all = all));
+            let status = tr_with!("activity-analyzing", done = done, all = all);
+            return Some(Activity::new(status).with_progress(done as f32 / all.max(1) as f32));
         }
         let live = self.live.as_ref().filter(|live| live.thinking)?;
         let agent = live.setup.opponent.agent()?;
-        Some(tr_with!("activity-thinking", agent = agent.name()))
+        Some(Activity::new(tr_with!(
+            "activity-thinking",
+            agent = agent.name()
+        )))
     }
 
     pub fn opponent_name(&self) -> String {

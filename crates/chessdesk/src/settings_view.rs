@@ -257,16 +257,18 @@ impl SettingsView {
         label: SharedString,
         hint: SharedString,
         on: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = Settings::get(cx);
         ui::setting_row(label, Some(hint), &settings)
-            .child(ui::toggle(key, on, window, &settings).on_click(cx.listener(
-                move |_, _, _, cx| {
-                    Self::write(key, !on, cx);
-                },
-            )))
+            .child(
+                ui::toggle(key, on, window, cx, &settings).on_click(cx.listener(
+                    move |_, _, _, cx| {
+                        Self::write(key, !on, cx);
+                    },
+                )),
+            )
             .into_any_element()
     }
 

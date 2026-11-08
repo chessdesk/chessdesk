@@ -70,6 +70,16 @@ impl OpponentKind {
         }
     }
 
+    pub fn of_agent(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::ClaudeCode => Self::ClaudeCode,
+            AgentKind::Codex => Self::Codex,
+            AgentKind::Copilot => Self::Copilot,
+            AgentKind::OpenCode => Self::OpenCode,
+            AgentKind::Pi => Self::Pi,
+        }
+    }
+
     /// Whether Chessdesk can fetch what's missing itself, from the settings.
     pub fn downloadable(self) -> bool {
         match self {
@@ -165,7 +175,8 @@ impl Default for Setup {
             increment: 0,
             fen: None,
             token_budget: None,
-            annotate: false,
+            // On until turned off: the choice is saved with the rest when a game starts.
+            annotate: true,
             live_likelihood: false,
         }
     }
@@ -325,6 +336,17 @@ mod tests {
         let setup: Setup = toml::from_str("minutes = 5").unwrap();
         assert_eq!(setup.minutes, 5);
         assert_eq!(setup.opponent, OpponentKind::Stockfish);
+    }
+
+    #[test]
+    fn tutoring_is_on_unless_turned_off() {
+        assert!(Setup::default().annotate);
+        let off = Setup {
+            annotate: false,
+            ..Setup::default()
+        };
+        let text = toml::to_string(&off).unwrap();
+        assert!(!toml::from_str::<Setup>(&text).unwrap().annotate);
     }
 
     #[test]

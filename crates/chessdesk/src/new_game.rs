@@ -384,17 +384,19 @@ impl NewGame {
         hint: SharedString,
         on: bool,
         flip: fn(&mut Setup),
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = Settings::get(cx);
         ui::setting_row(label, Some(hint), &settings)
-            .child(ui::toggle(id, on, window, &settings).on_click(cx.listener(
-                move |this, _, _, cx| {
-                    flip(&mut this.setup);
-                    cx.notify();
-                },
-            )))
+            .child(
+                ui::toggle(id, on, window, cx, &settings).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        flip(&mut this.setup);
+                        cx.notify();
+                    },
+                )),
+            )
             .into_any_element()
     }
 
@@ -448,7 +450,8 @@ impl NewGame {
             .collect()
     }
 
-    /// What's needed before this opponent can play, with the way to get it if there is one.
+    /// What's needed before this opponent can play, with the way to get it if there is one:
+    /// its button starts fetching it, and opens the settings page that shows it coming.
     fn missing_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let settings = Settings::get(cx);
         let opponent = self.setup.opponent;
@@ -459,8 +462,13 @@ impl NewGame {
             (tr("download-in-settings"), SettingsPage::Engines)
         };
         let action = opponent.downloadable().then(|| {
-            ui::notice_button("download", label, false, &settings)
-                .on_click(cx.listener(move |_, _, _, cx| cx.emit(Event::OpenSettings(page))))
+            ui::notice_button("download", label, false, &settings).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.installs
+                        .update(cx, |installs, cx| installs.fetch_for(opponent, cx));
+                    cx.emit(Event::OpenSettings(page));
+                },
+            ))
         });
         Some(
             ui::notice(missing, None, &settings)
@@ -648,7 +656,7 @@ impl NewGame {
     }
 
     /// The rows every opponent has, at the end of the dialog.
-    fn closing_rows(&self, window: &Window, cx: &mut Context<Self>) -> [AnyElement; 3] {
+    fn closing_rows(&self, window: &mut Window, cx: &mut Context<Self>) -> [AnyElement; 3] {
         let setup = &self.setup;
         let tutoring = tr(if setup.opponent.agent().is_some() {
             "tutoring-hint-agent"

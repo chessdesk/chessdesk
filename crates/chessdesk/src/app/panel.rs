@@ -487,7 +487,7 @@ impl Chessdesk {
         let opponent_open = blank || self.folds.get(Section::Opponent).is_on();
         // Sharing the room by dragging only means something while both of them take some.
         let above_moves = if opponent_open && self.folds.get(Section::Moves).is_on() {
-            Self::render_divider(
+            self.render_divider(
                 "log-divider",
                 Axis::Vertical,
                 move |event: &MouseDownEvent, this: &Self| {
@@ -538,7 +538,7 @@ impl Chessdesk {
             .flex()
             .flex_none()
             .h_full()
-            .child(Self::render_divider(
+            .child(self.render_divider(
                 "panel-divider",
                 Axis::Horizontal,
                 |_, _| Dragging::Panel,

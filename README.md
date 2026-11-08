@@ -8,6 +8,9 @@
 <p align="center"><b>Play chess against Claude Code, Codex and the other AI agents you already use.</b><br>
 Or against Stockfish and Maia. Free, open source, on your own machine.</p>
 
+<p align="center"><b><a href="https://github.com/chessdesk/chessdesk/releases/latest">Download for Windows, macOS and Linux</a></b><br>
+<a href="#download">What your system asks on the first start</a></p>
+
 **Chessdesk** is a desktop chess app for playing the AI agents you already use: Claude Code, Codex,
 Copilot, OpenCode and Pi. They play you, and if you want, they talk you through the game: what they
 think of your last move, what they're planning, and where you're about to lose a piece, with arrows

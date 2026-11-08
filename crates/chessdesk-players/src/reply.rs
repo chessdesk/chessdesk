@@ -1,18 +1,41 @@
 //! Reading what agents write. Replies are meant to be one move, but models add move
 //! numbers, punctuation and the odd sentence, so this looks for the first legal move.
 
+use std::borrow::Cow;
+
 use chessdesk_core::annotation::{self, split_commands};
 use chessdesk_core::{Annotations, Game};
 use shakmaty::san::San;
 use shakmaty::uci::UciMove;
 use shakmaty::{Chess, Move, Position};
 
-/// Strips what surrounds a move in prose: `1...`, `**Nf3**`, `e5.`.
-fn clean(word: &str) -> &str {
+/// Strips what surrounds a move in prose: `1...`, `**Nf3**`, `e5.`. Castling comes out as
+/// `O-O`, the one way the parser reads it, however it was written.
+fn clean(word: &str) -> Cow<'_, str> {
     let word =
         word.trim_matches(|c: char| matches!(c, '*' | '`' | '"' | '\'' | ',' | ';' | '(' | ')'));
-    let word = word.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-    word.trim_end_matches(['.', '!', '?', ':'])
+    let word = without_move_number(word).trim_end_matches(['.', '!', '?', ':']);
+    castling(word).map_or(Cow::Borrowed(word), Cow::Owned)
+}
+
+/// `e4` from `1.e4` and `e5` from `1...e5`. Digits without dots are left: `0-0` is a move.
+fn without_move_number(word: &str) -> &str {
+    let rest = word.trim_start_matches(|c: char| c.is_ascii_digit());
+    if rest.starts_with('.') {
+        rest.trim_start_matches('.')
+    } else {
+        word
+    }
+}
+
+/// `0-0`, `o-o-o+` and the like as `O-O` and `O-O-O+`. Models write zeros often, which
+/// isn't SAN, and a castling read as no move left the comment's moves to be played instead.
+fn castling(word: &str) -> Option<String> {
+    let (body, check) = word.split_at(word.trim_end_matches(['+', '#']).len());
+    let normal = body.replace(['0', 'o'], "O");
+    matches!(normal.as_str(), "O-O" | "O-O-O")
+        .then(|| format!("{normal}{check}"))
+        .filter(|castle| castle != word)
 }
 
 fn parse_move(word: &str, position: &Chess) -> Option<Move> {
@@ -125,6 +148,31 @@ mod tests {
         }
         let (played, _) = parse("1...e5", &after(&["e4"]).position()).unwrap();
         assert_eq!(played.to(), Square::E5);
+    }
+
+    #[test]
+    fn castling_reads_however_it_is_written() {
+        let position = after(&["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]).position();
+        for reply in [
+            "O-O", "0-0", "o-o", "4. 0-0", "4.O-O", "**0-0**", "O-O+", "e1g1",
+        ] {
+            let (played, _) = parse(reply, &position).unwrap();
+            assert!(played.is_castle(), "{reply}");
+        }
+        // The comment names another legal move, which must not be played instead.
+        let (played, annotations) = parse("0-0 {Castling, then h3}", &position).unwrap();
+        assert!(played.is_castle());
+        assert_eq!(annotations.text, "Castling, then h3");
+    }
+
+    #[test]
+    fn queenside_castling_reads_with_zeros() {
+        let position = Game::parse_fen("r3k3/8/8/8/8/8/8/4K3 b q - 0 1").unwrap();
+        let (played, _) = parse("0-0-0", &position).unwrap();
+        assert!(played.is_castle());
+        assert_eq!(clean("0-0-0#"), "O-O-O#");
+        assert_eq!(clean("10."), "");
+        assert_eq!(clean("1...e5"), "e5");
     }
 
     #[test]
