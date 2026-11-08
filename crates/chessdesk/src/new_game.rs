@@ -479,8 +479,10 @@ impl NewGame {
         OpponentKind::ALL
             .into_iter()
             .map(|kind| {
-                // OpenCode comes with models that cost nothing, which is worth knowing here.
-                let note = (kind == OpponentKind::OpenCode).then(|| tr("free-options"));
+                // OpenCode comes with models that cost nothing, and Pi offers OpenRouter's,
+                // which is worth knowing here.
+                let note = matches!(kind, OpponentKind::OpenCode | OpponentKind::Pi)
+                    .then(|| tr("free-options"));
                 Choice {
                     logo: logo_of(kind),
                     note,
@@ -891,7 +893,7 @@ impl NewGame {
         {
             return None;
         }
-        let need = NeedsStockfish::of(setup.shows_likelihood(), setup.grades_moves())?;
+        let need = NeedsStockfish::of(setup.shows_likelihood(), setup.stockfish_coaches())?;
         Some(
             installs::stockfish_notice(need, &self.installs, cx)
                 .mt_1()

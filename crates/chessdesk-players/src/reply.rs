@@ -13,11 +13,19 @@ use shakmaty::{Chess, Color, Move, Position};
 /// write the move well and its arrow badly: their own move instead, or the whole plan.
 const NEXT: &str = "next";
 
-/// Strips what surrounds a move in prose: `1...`, `**Nf3**`, `e5.`. Castling comes out as
-/// `O-O`, the one way the parser reads it, however it was written.
+/// Strips what surrounds a move in prose: `1...`, `**Nf3**`, `e5.`, `e5's`. Castling comes
+/// out as `O-O`, the one way the parser reads it, however it was written.
 fn clean(word: &str) -> Cow<'_, str> {
-    let word =
-        word.trim_matches(|c: char| matches!(c, '*' | '`' | '"' | '\'' | ',' | ';' | '(' | ')'));
+    let word = word.trim_matches(|c: char| {
+        matches!(
+            c,
+            '*' | '`' | '"' | '\'' | ',' | ';' | '(' | ')' | '{' | '}'
+        )
+    });
+    let word = ["'s", "’s"]
+        .iter()
+        .find_map(|possessive| word.strip_suffix(possessive))
+        .unwrap_or(word);
     let word = without_move_number(word).trim_end_matches(['.', '!', '?', ':']);
     castling(word).map_or(Cow::Borrowed(word), Cow::Owned)
 }
@@ -55,16 +63,60 @@ fn parse_move(word: &str, position: &Chess) -> Option<Move> {
 /// The first legal move in a reply, and the reply's markings. Whatever isn't the move
 /// counts as the comment, unless it's in the way of nothing but the move.
 pub fn parse(reply: &str, position: &Chess) -> Option<(Move, Annotations)> {
-    let (text, _) = split_commands(reply);
-    let (played, word) = text
+    let reply = &spoken_next(reply);
+    let (text, commands) = split_commands(reply);
+    let found = text
         .split_whitespace()
-        .find_map(|word| Some((parse_move(word, position)?, word)))?;
+        .find_map(|word| Some((parse_move(word, position)?, word)));
+    let Some((played, word)) = found else {
+        // Its own move put where the player's goes: `{I'll answer in the center.} [%next e5]`.
+        let (_, named) = commands.iter().find(|(name, _)| *name == NEXT)?;
+        let played = parse_move(named.trim(), position)?;
+        let mut annotations = annotation::parse(reply);
+        annotations.text = comment_text(&text, "");
+        return Some((played, annotations));
+    };
     let mut annotations = annotation::parse(reply);
     annotations.text = comment_text(&text, word);
     let mut after = position.clone();
     after.play_unchecked(played);
     add_next(&mut annotations, reply, &after);
     Some((played, annotations))
+}
+
+/// Keeps the move of a `[%next SAN]` written inside a comment's sentence: "Your first move:
+/// [%next e4]" would read "Your first move:" once the command is taken out. Left alone where
+/// the comment names the move already.
+fn spoken_next(reply: &str) -> Cow<'_, str> {
+    const OPEN: &str = "[%next ";
+    if !reply.contains(OPEN) {
+        return Cow::Borrowed(reply);
+    }
+    let mut spoken = String::with_capacity(reply.len() + 8);
+    let mut rest = reply;
+    while let Some(start) = rest.find(OPEN) {
+        let Some(length) = rest[start..].find(']') else {
+            break;
+        };
+        let before = &rest[..start];
+        spoken.push_str(before);
+        let named = rest[start + OPEN.len()..start + length].trim();
+        let opened = spoken.rfind('{');
+        let in_comment = opened.is_some_and(|open| !spoken[open..].contains('}'));
+        let said = opened.is_some_and(|open| {
+            spoken[open..]
+                .split(|c: char| c.is_whitespace() || matches!(c, '.' | ',' | '!' | ':' | '*'))
+                .any(|word| word == named)
+        });
+        if in_comment && !said {
+            spoken.push_str(named);
+            spoken.push(' ');
+        }
+        spoken.push_str(&rest[start..=start + length]);
+        rest = &rest[start + length + 1..];
+    }
+    spoken.push_str(rest);
+    Cow::Owned(spoken)
 }
 
 /// Draws the player's next move, if the reply names one that's legal in `position`.
@@ -75,12 +127,18 @@ fn add_next(annotations: &mut Annotations, reply: &str, position: &Chess) {
         .find(|(name, _)| *name == NEXT)
         .and_then(|(_, named)| parse_move(named.trim(), position))
         .and_then(|next| arrow_of(next, position.turn()));
-    if let Some(arrow) = arrow.filter(|arrow| !annotations.arrows.contains(arrow)) {
+    if let Some(arrow) = arrow {
+        // Drawn already as one of the agent's own arrows: once is enough, as the next move.
+        annotations
+            .arrows
+            .retain(|drawn| (drawn.from, drawn.to) != (arrow.from, arrow.to));
         annotations.arrows.push(arrow);
     }
 }
 
-/// A move as an arrow: castling from the king to where it lands.
+/// The player's next move as an arrow, castling from the king to where it lands. Blue, as a
+/// hint's: green ones are the agent's own ideas, and a lesson's next move drawn green was
+/// one arrow among several.
 fn arrow_of(played: Move, mover: Color) -> Option<Arrow> {
     let to = played
         .castling_side()
@@ -88,13 +146,14 @@ fn arrow_of(played: Move, mover: Color) -> Option<Arrow> {
     Some(Arrow {
         from: played.from()?,
         to,
-        mark: Mark::Green,
+        mark: Mark::Blue,
     })
 }
 
 /// What the agent said without a move: the comment of an introduction in `position`, and
 /// its markings.
 pub fn remark(reply: &str, position: &Chess) -> Annotations {
+    let reply = &spoken_next(reply);
     let (text, _) = split_commands(reply);
     let mut annotations = annotation::parse(reply);
     annotations.text = comment_text(&text, "");
@@ -215,6 +274,38 @@ mod tests {
     }
 
     #[test]
+    fn a_move_put_where_the_players_goes_is_still_played() {
+        // As GLM 5.3 Flash wrote it: no move but its own, in `[%next]`.
+        let position = after(&["e4"]).position();
+        let reply = "{Good, clean start. I'll answer in the center.} [%next e5]";
+        let (played, said) = parse(reply, &position).unwrap();
+        assert_eq!(played.to(), Square::E5);
+        assert_eq!(said.text, "Good, clean start. I'll answer in the center.");
+        assert_eq!(said.arrows.len(), 0);
+        // A possessive is no reason to miss it.
+        let (played, _) = parse("{e5's legal, I'm playing it.}", &position).unwrap();
+        assert_eq!(played.to(), Square::E5);
+    }
+
+    #[test]
+    fn the_next_move_is_blue_and_drawn_once() {
+        let reply = "Nc6 {Bring the bishop out.} [%cal Gf1c4,Gc4f7] [%next Bc4]";
+        let (_, said) = parse(reply, &after(&["e4", "e5", "Qh5"]).position()).unwrap();
+        let drawn: Vec<_> = said
+            .arrows
+            .iter()
+            .map(|arrow| (arrow.from.to_string(), arrow.to.to_string(), arrow.mark))
+            .collect();
+        assert_eq!(
+            drawn,
+            [
+                ("c4".to_owned(), "f7".to_owned(), Mark::Green),
+                ("f1".to_owned(), "c4".to_owned(), Mark::Blue),
+            ]
+        );
+    }
+
+    #[test]
     fn the_players_next_move_is_drawn_when_named_and_legal() {
         let squares = |said: &Annotations| -> Vec<String> {
             said.arrows
@@ -235,6 +326,34 @@ mod tests {
             squares(&remark("{Hm.} [%next e5]", &Chess::default())),
             [""; 0]
         );
+    }
+
+    #[test]
+    fn a_next_move_written_into_the_sentence_stays_in_it() {
+        // As GLM 5.3 Flash wrote them.
+        let intro = remark(
+            "{Your first move: [%next e4] [%csl Ge5f7]}",
+            &Chess::default(),
+        );
+        assert_eq!(intro.text, "Your first move: e4");
+        assert_eq!(intro.arrows.len(), 1);
+        let position = after(&["e4", "e5", "Bc4"]).position();
+        let (_, said) = parse(
+            "Nc6 {Here's your chance: [%next Qh5] puts f7 in your sights.}",
+            &position,
+        )
+        .unwrap();
+        assert_eq!(said.text, "Here's your chance: Qh5 puts f7 in your sights.");
+        // Named already, or outside the comment: nothing added.
+        let named = remark("{Play e4. [%next e4]}", &Chess::default());
+        assert_eq!(named.text, "Play e4.");
+        let earlier = remark(
+            "{First move: e4, grabbing the center. [%next e4]}",
+            &Chess::default(),
+        );
+        assert_eq!(earlier.text, "First move: e4, grabbing the center.");
+        let after_it = remark("{Push the king's pawn.} [%next e4]", &Chess::default());
+        assert_eq!(after_it.text, "Push the king's pawn.");
     }
 
     #[test]

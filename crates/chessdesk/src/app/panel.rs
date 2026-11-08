@@ -807,7 +807,10 @@ impl Chessdesk {
                     .child(black)
             });
         let comment = session.shown_comment();
-        let paused = session.live.as_ref().and_then(|live| live.paused.clone());
+        let paused = session
+            .live
+            .as_ref()
+            .and_then(|live| live.paused.as_ref()?.notice());
         let instructions = session
             .live
             .as_ref()
