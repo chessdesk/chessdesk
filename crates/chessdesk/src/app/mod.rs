@@ -9,7 +9,6 @@ mod motion;
 mod panel;
 mod session;
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -35,7 +34,7 @@ use crate::settings_view::{self, SettingsPage, SettingsView};
 use crate::setup::Setup;
 use crate::ui::{self, Edge, Icon};
 use motion::Motion;
-use panel::Section;
+use panel::{Folds, LogSpace};
 use session::{Session, SessionId};
 
 actions!(
@@ -102,10 +101,12 @@ pub fn bind_keys(cx: &mut App) {
 enum Dragging {
     History,
     Panel,
-    /// Where the press was and how tall the log was then.
+    /// Where the press was, how tall the log stood then, and how tall it could get: as tall
+    /// as the room the opponent's section above had to give.
     Log {
         from: Pixels,
         height: Pixels,
+        most: Pixels,
     },
 }
 
@@ -123,8 +124,9 @@ pub struct Chessdesk {
     history_width: Pixels,
     panel_width: Pixels,
     log_height: Pixels,
-    /// The game panel's sections folded into their titles.
-    collapsed: HashSet<Section>,
+    /// How far each of the game panel's sections is open.
+    folds: Folds,
+    log_space: LogSpace,
     moves_scroll: ScrollHandle,
     /// The game and row of the log last scrolled to, so that it only follows a change and
     /// leaves the player's own scrolling alone.
@@ -132,6 +134,8 @@ pub struct Chessdesk {
     /// Whether to scroll once more: GPUI goes by the log's place in the frame before, and
     /// the log moves when the panel changes along with the game.
     follow_again: bool,
+    /// How tall the log was then, to follow again when that changes.
+    followed_height: Pixels,
     dragging: Option<Dragging>,
     /// The likelihood bars, on their way to the latest numbers.
     likelihood: Motion,
@@ -170,11 +174,12 @@ impl Chessdesk {
             history_width: settings.history_width,
             panel_width: settings.panel_width,
             log_height: settings.log_height,
-            // Notes are there for when they're wanted, not in the way of the moves.
-            collapsed: HashSet::from([Section::Notes]),
+            folds: Folds::new(Instant::now()),
+            log_space: LogSpace::default(),
             moves_scroll: ScrollHandle::new(),
             followed_row: None,
             follow_again: false,
+            followed_height: px(0.),
             dragging: None,
             likelihood: Motion::new(Instant::now()),
             open_menu: None,
@@ -199,12 +204,15 @@ impl Chessdesk {
         let session = self.session();
         let row = session.log_row();
         let shown = Some((session.id, row));
+        // A log that got shorter, by a smaller window or the divider, may have hidden it.
+        let height = self.log_space.shown();
+        let resized = std::mem::replace(&mut self.followed_height, height) != height;
         if self.followed_row != shown {
             self.followed_row = shown;
             self.follow_again = true;
             self.moves_scroll.scroll_to_item(row);
             window.request_animation_frame();
-        } else if std::mem::take(&mut self.follow_again) {
+        } else if std::mem::take(&mut self.follow_again) || resized {
             self.moves_scroll.scroll_to_item(row);
         }
     }
@@ -374,8 +382,9 @@ impl Chessdesk {
                 let from_edge = width - event.position.x - ui::EDGE_STRIP_SIZE;
                 self.panel_width = from_edge.clamp(MIN_PANE, widest);
             }
-            Dragging::Log { from, height } => {
-                self.log_height = (height + from - event.position.y).clamp(MIN_LOG, MAX_LOG);
+            Dragging::Log { from, height, most } => {
+                let most = most.min(MAX_LOG).max(MIN_LOG);
+                self.log_height = (height + from - event.position.y).clamp(MIN_LOG, most);
             }
         }
         cx.notify();

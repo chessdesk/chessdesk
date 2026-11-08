@@ -545,7 +545,7 @@ impl NewGame {
         let settings = Settings::get(cx);
         let ready = self.setup.opponent.missing(&settings).is_none();
         let start = if ready {
-            ui::action_button("start", tr("start-game"), &settings).on_click(cx.listener(
+            ui::primary_button("start", tr("start-game"), &settings).on_click(cx.listener(
                 |this, _, _, cx| {
                     let mut setup = this.setup.clone();
                     this.instructions
@@ -586,14 +586,18 @@ impl Render for NewGame {
         let rows = self.rows(window, cx);
         let buttons = self.buttons(cx);
 
-        ui::modal("new-game", &settings).child(
-            ui::popover(window, &settings)
-                .w(DIALOG_WIDTH)
-                .p_4()
-                .text_color(settings.colors.text)
-                .child(ui::title(tr("new-game"), &settings))
-                .children(rows)
-                .child(buttons),
+        ui::fade_in(
+            "new-game-shade",
+            ui::modal("new-game", &settings).child(ui::rise_in(
+                "new-game-in",
+                ui::dialog(window, &settings)
+                    .w(DIALOG_WIDTH)
+                    .p_4()
+                    .text_color(settings.colors.text)
+                    .child(ui::title(tr("new-game"), &settings))
+                    .children(rows)
+                    .child(buttons),
+            )),
         )
     }
 }

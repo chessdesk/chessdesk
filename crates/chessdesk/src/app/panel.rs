@@ -3,7 +3,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chessdesk_core::review::Verdict;
 use chessdesk_core::{Ending, Mark, PlayedMove};
@@ -11,7 +11,8 @@ use chessdesk_players::acp::AgentKind;
 use chessdesk_players::adapters::{self, Readiness};
 use gpui::{
     AnyElement, Axis, Bounds, Context, Corner, Div, Hsla, MouseButton, MouseDownEvent, PathBuilder,
-    Pixels, SharedString, Window, anchored, canvas, deferred, div, point, prelude::*, px, rgb,
+    Pixels, SharedString, Transformation, Window, anchored, canvas, deferred, div, percentage,
+    point, prelude::*, px, rgb,
 };
 use shakmaty::{Color, Position};
 
@@ -20,7 +21,7 @@ use super::{Chessdesk, Dragging, clock};
 use crate::i18n::{tr, tr_with};
 use crate::library::{Standing, standing};
 use crate::settings::{Settings, side_name};
-use crate::ui::{self, Icon, Logo};
+use crate::ui::{self, Icon, Logo, Transition};
 
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
 /// White's side of the bar, whatever the theme does with light and dark.
@@ -40,6 +41,13 @@ const NUMBER_WIDTH: Pixels = px(30.);
 const RESULT_TINT: f32 = 0.16;
 /// What the panel's padding takes off the width of the Analyze button's choices.
 const ANALYZE_MENU_INSET: Pixels = px(24.);
+/// How long a section of the game panel takes to fold or open.
+const FOLD: Duration = Duration::from_millis(200);
+/// How much of the room the opponent's section and the moves share the moves may take, at
+/// most: in a small window, both give way, so that what was said stays in view.
+pub(super) const LOG_SHARE: f32 = 2. / 3.;
+/// What every share of the panel's room is multiplied by: see [`grow`].
+const GROW_SCALE: f32 = 1000.;
 const BUBBLE_TAIL_INSET: Pixels = px(10.);
 const BUBBLE_TAIL_WIDTH: Pixels = px(9.);
 const BUBBLE_TAIL_HEIGHT: Pixels = px(7.);
@@ -117,12 +125,124 @@ fn section(settings: &Settings) -> Div {
 }
 
 /// The parts of the game panel that fold into their titles.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Section {
     Opponent,
     Likelihood,
     Moves,
     Notes,
+}
+
+impl Section {
+    const ALL: [Self; 4] = [Self::Opponent, Self::Likelihood, Self::Moves, Self::Notes];
+}
+
+/// How far each section of the game panel is open, on its way to open or folded.
+pub(super) struct Folds {
+    open: [Transition; 4],
+    /// How tall what each section holds stands, measured whenever it shows. Only the
+    /// sections as tall as what they hold use it: the others share the panel's room.
+    heights: [Rc<Cell<Pixels>>; 4],
+}
+
+impl Folds {
+    /// Everything open but the notes, which are there for when they're wanted.
+    pub(super) fn new(now: Instant) -> Self {
+        Self {
+            open: Section::ALL
+                .map(|section| Transition::settled(section != Section::Notes, FOLD, now)),
+            heights: Default::default(),
+        }
+    }
+
+    fn get(&self, section: Section) -> &Transition {
+        &self.open[section as usize]
+    }
+
+    fn toggle(&mut self, section: Section, now: Instant) {
+        let fold = &mut self.open[section as usize];
+        fold.set(!fold.is_on(), now);
+    }
+
+    /// From 0 for folded to 1 for open.
+    fn openness(&self, section: Section, now: Instant) -> f32 {
+        self.get(section).value(now)
+    }
+
+    /// Folded all the way, and staying so: nothing below its title to draw.
+    fn is_folded(&self, section: Section, now: Instant) -> bool {
+        let fold = self.get(section);
+        !fold.is_on() && !fold.is_moving(now)
+    }
+
+    fn is_moving(&self, now: Instant) -> bool {
+        self.open.iter().any(|fold| fold.is_moving(now))
+    }
+}
+
+/// How tall the moves' log stands right now, and how much more the opponent's section above
+/// could give it: what dragging the divider between them goes by, rather than the height
+/// asked for, which a small window may not have room for.
+#[derive(Default)]
+pub(super) struct LogSpace {
+    shown: Rc<Cell<Pixels>>,
+    spare: Rc<Cell<Pixels>>,
+}
+
+impl LogSpace {
+    pub(super) fn shown(&self) -> Pixels {
+        self.shown.get()
+    }
+}
+
+/// Keeps `into` up to date with the height its parent is drawn at, drawing once more when it
+/// changes, so that whatever goes by it never lags a frame behind.
+fn measure(into: &Rc<Cell<Pixels>>) -> impl IntoElement {
+    let into = into.clone();
+    canvas(
+        move |bounds, window, _| {
+            if into.replace(bounds.size.height) != bounds.size.height {
+                window.request_animation_frame();
+            }
+        },
+        |_, (), _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// The part of a section below its title that shares the panel's room with the others,
+/// taking `weight` of it, down to nothing in a small window however much it holds.
+fn shared_body(weight: f32, holds: impl IntoElement) -> Div {
+    grow(
+        div()
+            .flex()
+            .flex_col()
+            .flex_basis(px(0.))
+            .min_h_0()
+            .overflow_hidden(),
+        weight,
+    )
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .px_3()
+            .pb_2()
+            .child(holds),
+    )
+}
+
+/// Sets how much of the room left a part takes, next to the others asking for some.
+fn grow(mut part: Div, weight: f32) -> Div {
+    // Weights adding up to less than one hand out only that much of the room and leave the
+    // rest empty, as in CSS. Scaled up, only how they compare counts.
+    part.style().flex_grow = Some(weight * GROW_SCALE);
+    part
 }
 
 /// What the agent said: a speech bubble, in the look of an active tab. Its tail points up, to
@@ -329,20 +449,33 @@ fn draw_line(width: Pixels, points: &[gpui::Point<Pixels>], color: Hsla, window:
 impl Chessdesk {
     pub(super) fn render_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
+        let now = Instant::now();
+        if self.folds.is_moving(now) {
+            window.request_animation_frame();
+        }
         let blank = self.session().is_blank();
         let line = || ui::horizontal_line(window, &settings);
-        // One section takes the room the others leave: the opponent's, or else the moves.
-        let opponent_grows = blank || self.is_open(Section::Opponent);
-        let moves_open = self.is_open(Section::Moves);
-        let moves_grow = moves_open && !opponent_grows;
+        // The opponent's section takes the room the others leave, the moves what it leaves
+        // as it folds, and with both folded the room stays empty above the buttons.
+        let opponent = if blank {
+            1.
+        } else {
+            self.folds.openness(Section::Opponent, now)
+        };
+        let moves = self.folds.openness(Section::Moves, now);
+        let opponent_open = blank || self.folds.get(Section::Opponent).is_on();
         // Sharing the room by dragging only means something while both of them take some.
-        let above_moves = if opponent_grows && moves_open {
+        let above_moves = if opponent_open && self.folds.get(Section::Moves).is_on() {
             Self::render_divider(
                 "log-divider",
                 Axis::Vertical,
-                move |event: &MouseDownEvent, this: &Self| Dragging::Log {
-                    from: event.position.y,
-                    height: this.log_height,
+                move |event: &MouseDownEvent, this: &Self| {
+                    let height = this.log_space.shown.get();
+                    Dragging::Log {
+                        from: event.position.y,
+                        height,
+                        most: (height + this.log_space.spare.get()) * LOG_SHARE,
+                    }
                 },
                 window,
                 cx,
@@ -351,18 +484,17 @@ impl Chessdesk {
             line()
         };
 
-        let mut column = div()
-            .flex()
-            .flex_col()
-            .h_full()
-            .w(self.panel_width)
-            .child(self.render_opponent(cx));
+        let mut column = div().flex().flex_col().h_full().w(self.panel_width);
+        let (opponent_title, opponent_body) = self.render_opponent(opponent, cx);
+        column = column.child(opponent_title).children(opponent_body);
         if let Some(likelihood) = self.render_likelihood(window, cx) {
             column = column.child(line()).child(likelihood);
         }
+        let (moves_title, moves_body) = self.render_moves(opponent, moves, cx);
         column = column
             .child(above_moves)
-            .child(self.render_moves(moves_grow, cx));
+            .child(moves_title)
+            .children(moves_body);
         // With no game there's nothing to note or act on, and the new game button is on the
         // board's place.
         if !blank {
@@ -370,11 +502,16 @@ impl Chessdesk {
                 .child(line())
                 .child(self.render_notes(cx))
                 .child(line());
-            // With everything folded, the buttons still keep to the bottom.
-            if !opponent_grows && !moves_grow {
-                column = column.child(div().flex_1()).child(line());
+            let empty = (1. - opponent) * (1. - moves);
+            if empty > 0. {
+                column = column.child(
+                    grow(div().flex_basis(px(0.)), empty)
+                        .border_b(ui::hairline(window))
+                        .border_color(settings.colors.popover_border),
+                );
             }
-            column = column.child(self.render_actions(window, cx));
+            // Whatever room is left over goes above them: the buttons keep to the bottom.
+            column = column.child(self.render_actions(window, cx).mt_auto());
         }
         div()
             .flex()
@@ -391,12 +528,8 @@ impl Chessdesk {
             .into_any_element()
     }
 
-    fn is_open(&self, section: Section) -> bool {
-        !self.collapsed.contains(&section)
-    }
-
     /// A section's title row. Pressing the title folds the section into the row, or opens it
-    /// again; anything added as a child sits at the row's far end.
+    /// again, the chevron turning with it; anything added as a child sits at the row's far end.
     fn section_title(
         &self,
         section: Section,
@@ -405,11 +538,13 @@ impl Chessdesk {
     ) -> Div {
         let settings = Settings::get(cx);
         let text = settings.colors.text;
-        let chevron = if self.is_open(section) {
-            Icon::ChevronDown
-        } else {
-            Icon::ChevronRight
-        };
+        let open = self.folds.openness(section, Instant::now());
+        let chevron = ui::icon(
+            Icon::ChevronRight,
+            settings.ui_font_size,
+            settings.colors.muted,
+        )
+        .with_transformation(Transformation::rotate(percentage(open / 4.)));
         let fold = div()
             .id(("fold", section as usize))
             .flex()
@@ -419,16 +554,10 @@ impl Chessdesk {
             .gap_1()
             .cursor_pointer()
             .hover(move |style| style.text_color(text))
-            .child(ui::icon(
-                chevron,
-                settings.ui_font_size,
-                settings.colors.muted,
-            ))
+            .child(chevron)
             .child(title)
             .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.collapsed.remove(&section) {
-                    this.collapsed.insert(section);
-                }
+                this.folds.toggle(section, Instant::now());
                 cx.notify();
             }));
         div()
@@ -439,6 +568,24 @@ impl Chessdesk {
             .gap_2()
             .text_color(settings.colors.muted)
             .child(fold)
+    }
+
+    /// What a section as tall as what it holds shows below its title: all of it while open,
+    /// and while it folds or opens, as much of its height as it's open. `None` once folded.
+    fn fold_body(&self, section: Section, body: Div) -> Option<Div> {
+        let now = Instant::now();
+        if self.folds.is_folded(section, now) {
+            return None;
+        }
+        let body = body
+            .flex_none()
+            .child(measure(&self.folds.heights[section as usize]));
+        let fold = self.folds.get(section);
+        if fold.is_on() && !fold.is_moving(now) {
+            return Some(body);
+        }
+        let shown = self.folds.heights[section as usize].get() * fold.value(now);
+        Some(div().flex_none().h(shown).overflow_hidden().child(body))
     }
 
     /// The opponent's name, with the tokens used so far on hover, and whether they're busy.
@@ -480,18 +627,18 @@ impl Chessdesk {
         )
     }
 
-    /// Who you're playing, whether they're thinking, and what they said about the move.
-    /// Takes the room left over while it's open.
-    fn render_opponent(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// Who you're playing, whether they're thinking, and what they said about the move: the
+    /// title row, and below it what takes as much of the room left over as it's `open`.
+    fn render_opponent(&self, open: f32, cx: &mut Context<Self>) -> (AnyElement, Option<Div>) {
         let settings = Settings::get(cx);
         let settings = &settings;
         let session = self.session();
         if session.is_blank() {
-            return ui::empty_panel(settings).into_any_element();
+            return (ui::empty_panel(settings).into_any_element(), None);
         }
-        let title = self.render_opponent_title(cx);
-        if !self.is_open(Section::Opponent) {
-            return section(settings).child(title).into_any_element();
+        let title = section(settings).child(self.render_opponent_title(cx));
+        if self.folds.is_folded(Section::Opponent, Instant::now()) {
+            return (title.into_any_element(), None);
         }
         let muted = settings.colors.muted;
         let time = |color: Color| {
@@ -521,44 +668,37 @@ impl Chessdesk {
                     .flex_col()
                     .flex_none()
                     .gap_1()
-                    .px_3()
-                    .pb_2()
+                    .pt_2()
                     .child(div().text_color(muted).child(tr("agent-instructions")))
                     .child(area.clone())
             });
-        div()
+        let said = div()
+            .id("opponent-section")
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
-            .child(
-                div()
-                    .id("opponent-section")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .gap_2()
-                    .px_3()
-                    .py_2()
-                    .overflow_y_scroll()
-                    .text_color(settings.colors.text)
-                    .child(title)
-                    .children(clocks)
-                    .children(render_result(session, settings))
-                    .children(
-                        session
-                            .latest_verdict()
-                            .map(|(played, verdict)| render_verdict(played, verdict, settings)),
-                    )
-                    .children(comment.map(|text| render_bubble(text, settings)))
-                    .children(
-                        paused
-                            .map(|reason| div().text_color(settings.colors.callout).child(reason)),
-                    ),
+            .gap_2()
+            .overflow_y_scroll()
+            .children(clocks)
+            .children(render_result(session, settings))
+            .children(
+                session
+                    .latest_verdict()
+                    .map(|(played, verdict)| render_verdict(played, verdict, settings)),
             )
-            .children(instructions)
-            .into_any_element()
+            .children(comment.map(|text| render_bubble(text, settings)))
+            .children(paused.map(|reason| div().text_color(settings.colors.callout).child(reason)));
+        let holds = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .child(said)
+            .children(instructions);
+        let body =
+            shared_body(open * (1. - LOG_SHARE), holds).child(measure(&self.log_space.spare));
+        (title.into_any_element(), Some(body))
     }
 
     fn render_likelihood(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
@@ -578,7 +718,7 @@ impl Chessdesk {
                     ))
                     .tooltip(ui::tooltip(tr("likelihood-source"))),
             );
-        if !self.is_open(Section::Likelihood) {
+        if self.folds.is_folded(Section::Likelihood, Instant::now()) {
             return Some(section(&settings).child(title));
         }
         let start = session.start_wdl().map(|wdl| (0, wdl.expected()));
@@ -617,20 +757,20 @@ impl Chessdesk {
             this.step_to(ply_at(x, f32::from(wide), plies), cx);
         });
 
+        let body = div().flex().flex_col().gap_3().pt_3().child(summary).child(
+            div()
+                .id("graph")
+                .h(GRAPH_HEIGHT)
+                .w_full()
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, press)
+                .child(graph),
+        );
         Some(
             section(&settings)
-                .gap_3()
+                .gap_0()
                 .child(title)
-                .child(summary)
-                .child(
-                    div()
-                        .id("graph")
-                        .h(GRAPH_HEIGHT)
-                        .w_full()
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, press)
-                        .child(graph),
-                ),
+                .children(self.fold_body(Section::Likelihood, body)),
         )
     }
 
@@ -650,9 +790,10 @@ impl Chessdesk {
         )
     }
 
-    /// The moves, in a log as tall as the divider above it sets, or as all the room the panel
-    /// has left when `grow`.
-    fn render_moves(&self, grow: bool, cx: &mut Context<Self>) -> Div {
+    /// The moves, in a log as tall as the divider above it sets, or its share of the room in a
+    /// window too small for that, while the opponent's section is `opponent` open; taking the
+    /// room it leaves as it folds; as much of either as the log itself is `open`.
+    fn render_moves(&self, opponent: f32, open: f32, cx: &mut Context<Self>) -> (Div, Option<Div>) {
         let settings = Settings::get(cx);
         let session = self.session();
         let ply = session.ply;
@@ -673,11 +814,12 @@ impl Chessdesk {
                     .on_click(cx.listener(move |this, _, _, cx| this.step_to(ply + 1, cx))),
             );
         // The steps stay when it's folded: going through the game needs no log.
-        let title = self
-            .section_title(Section::Moves, tr("moves"), cx)
-            .child(steps);
-        if !self.is_open(Section::Moves) {
-            return section(&settings).child(title);
+        let title = section(&settings).child(
+            self.section_title(Section::Moves, tr("moves"), cx)
+                .child(steps),
+        );
+        if self.folds.is_folded(Section::Moves, Instant::now()) {
+            return (title, None);
         }
 
         let start = session.game.start();
@@ -707,42 +849,38 @@ impl Chessdesk {
             })
             .collect();
         let empty = lines.is_empty().then(|| ui::empty_panel(&settings));
-        section(&settings)
-            .map(|log| {
-                if grow {
-                    log.flex_1().min_h_0()
-                } else {
-                    log.h(self.log_height)
-                }
-            })
-            .child(title)
-            .child(
-                div()
-                    .id("moves")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .gap_0p5()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.moves_scroll)
-                    .children(lines)
-                    .children(empty),
-            )
+        let log = div()
+            .id("moves")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .gap_0p5()
+            .overflow_y_scroll()
+            .track_scroll(&self.moves_scroll)
+            .children(lines)
+            .children(empty);
+        // Its share of the room, up to the height asked for while the opponent's section is
+        // open, and without bound as that folds away.
+        let most = self.log_height * open / opponent.max(f32::EPSILON);
+        let body = shared_body(open * LOG_SHARE, log)
+            .max_h(most)
+            .child(measure(&self.log_space.shown));
+        (title, Some(body))
     }
 
     /// The player's own notes on the game, kept in its file.
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
         let settings = Settings::get(cx);
         let title = self.section_title(Section::Notes, tr("notes"), cx);
-        let area = self
+        let body = self
             .session()
             .notes
             .as_ref()
-            .filter(|_| self.is_open(Section::Notes))
-            .map(|(area, _)| area.clone());
-        section(&settings).child(title).children(area)
+            .map(|(area, _)| div().flex().flex_col().pt_1().child(area.clone()))
+            .and_then(|body| self.fold_body(Section::Notes, body));
+        section(&settings).gap_0().child(title).children(body)
     }
 
     /// The Analyze button: its choices open upwards, from the bottom of the panel.
@@ -802,7 +940,8 @@ impl Chessdesk {
                 });
             deferred(
                 anchored().anchor(Corner::BottomLeft).child(
-                    div().pb_1().child(
+                    div().pb_1().child(ui::rise_in(
+                        "analyze-menu-in",
                         ui::popover(window, &settings)
                             .id("analyze-menu")
                             .occlude()
@@ -813,7 +952,7 @@ impl Chessdesk {
                             }))
                             .child(stockfish)
                             .children(agents),
-                    ),
+                    )),
                 ),
             )
             .with_priority(1)

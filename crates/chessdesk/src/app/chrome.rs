@@ -151,7 +151,7 @@ fn window_controls(settings: &Settings, maximized: bool) -> Div {
             .justify_center()
             .h_full()
             .w(ui::WINDOW_CONTROL_WIDTH)
-            .hover(move |style| style.bg(accent))
+            .child(ui::hover_fill(accent, px(0.)))
             .tooltip(ui::tooltip(label))
             .window_control_area(area)
             .child(ui::icon(icon, size, muted))
@@ -254,7 +254,7 @@ impl Chessdesk {
             .cursor_pointer()
             .text_color(settings.colors.text)
             .when(is_open, |brand| brand.bg(accent))
-            .hover(move |style| style.bg(accent))
+            .child(ui::hover_fill(accent, px(0.)))
             // Acts on press, so that the root's click-away handler never sees it.
             .on_mouse_down(
                 MouseButton::Left,
@@ -296,9 +296,11 @@ impl Chessdesk {
             },
         ));
         Some(
-            ui::modal("about-dialog", &settings)
-                .child(
-                    ui::popover(window, &settings)
+            ui::fade_in(
+                "about-shade",
+                ui::modal("about-dialog", &settings).child(ui::rise_in(
+                    "about-in",
+                    ui::dialog(window, &settings)
                         .w(ABOUT_WIDTH)
                         .p_4()
                         .gap_2()
@@ -308,8 +310,9 @@ impl Chessdesk {
                         .child(tr("about-description"))
                         .child(div().text_color(muted).child(COPYRIGHT))
                         .child(div().flex().justify_end().pt_2().child(close)),
-                )
-                .into_any_element(),
+                )),
+            )
+            .into_any_element(),
         )
     }
 
@@ -377,11 +380,10 @@ impl Chessdesk {
                         .into_any_element(),
                 }
             });
-        deferred(
-            anchored()
-                .offset(point(px(0.), offset))
-                .child(ui::menu(window, &settings).children(rows)),
-        )
+        deferred(anchored().offset(point(px(0.), offset)).child(ui::drop_in(
+            "menu-in",
+            ui::menu(window, &settings).children(rows),
+        )))
         .with_priority(1)
     }
 
@@ -402,24 +404,28 @@ impl Chessdesk {
                 .on_click(cx.listener(move |this, _, _, cx| this.promote(role, cx)))
         });
         Some(
-            div()
-                .id("promotion")
-                .occlude()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(settings.colors.background.opacity(0.7))
-                .child(
-                    ui::popover(window, &settings)
-                        .flex_row()
-                        .gap_1()
-                        .children(choices),
-                )
-                .into_any_element(),
+            ui::fade_in(
+                "promotion-shade",
+                div()
+                    .id("promotion")
+                    .occlude()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(settings.colors.background.opacity(0.7))
+                    .child(ui::rise_in(
+                        "promotion-in",
+                        ui::dialog(window, &settings)
+                            .flex_row()
+                            .gap_1()
+                            .children(choices),
+                    )),
+            )
+            .into_any_element(),
         )
     }
 

@@ -314,6 +314,11 @@ impl Settings {
         self.corner_radius + self.popover_radius_extra
     }
 
+    /// Dialogs are larger still, so they take the extra twice.
+    pub fn dialog_radius(&self) -> Pixels {
+        self.popover_radius() + self.popover_radius_extra
+    }
+
     /// Where plugins live: copying a folder here installs one.
     pub fn plugins_dir() -> Option<PathBuf> {
         Some(Self::config_dir()?.join("plugins"))
