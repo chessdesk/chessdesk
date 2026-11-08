@@ -3,6 +3,41 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.6.0 - 2026-11-08
+
+### Added
+
+- New Game has the kind of game down its side: Casual, with hints, take-backs and tutoring, or
+  Competition, on a bullet, blitz, rapid or classical clock with no help. Scenarios are coming soon
+- The clock in New Game says how fast it is: bullet, blitz, rapid or classical
+- With tutoring on, an agent speaks before the first move even when you have White: ask it to
+  teach you the Sicilian and it sets out the plan and marks the board before you start
+- Ask an agent to teach you a line or tell you what to play and its comments name your next move
+  and mark it on the board, so a lesson goes on after the first move. Otherwise they only hint
+- Squares marked by an agent or in a PGN show as a ring, as on Lichess, instead of a tint that
+  looked like the last move and all but vanished on dark squares
+
+### Changed
+
+- Cards and notices have a faint edge, a shade off their fill
+- New Game keeps one height whichever kind of game is picked
+
+### Fixed
+
+- Changed translations reach installs that already have the language
+
+## 2.5.0 - 2026-11-08
+
+### Changed
+
+- An agent's hint shows as a card above the Hint button, naming the agent and the move
+- The Moves section of the game panel starts folded, leaving the opponent's words more room
+
+### Fixed
+
+- The instructions and the effort no longer squeeze the agent's comment in the game panel to a
+  line or two
+
 ## 2.4.0 - 2026-11-08
 
 ### Added

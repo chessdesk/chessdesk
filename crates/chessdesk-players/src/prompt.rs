@@ -16,8 +16,11 @@ const ANNOTATE: &str = " You are also a friendly club player coaching them acros
                         opinions, skip textbook phrases and vary how you start. Examples: \
                         Nc6 {Nice, no time wasted there. My knight's coming out before that \
                         e-pawn gets lonely.} or Bxf7 {Ooh, I'd have kept that bishop home. \
-                        Thanks for the pawn!} Add PGN markup if it helps: [%cal Gf3e5] for \
-                        arrows, [%csl Rd5] for squares (G, R, Y, B).";
+                        Thanks for the pawn!} Hint at ideas, don't hand them their next move, \
+                        unless they ask you to teach them a line or to tell them what to play: \
+                        then name only their next move, not the ones after, and add \
+                        [%next SAN] for it, which draws it for them. Add PGN markup if it \
+                        helps: [%cal Gf3e5] for arrows, [%csl Rd5] for squares (G, R, Y, B).";
 const REVIEW: &str = "You're a friendly coach going over a game with the player, who is You \
                       in the PGN. For each listed move write one line: the move as in the \
                       game, a {comment}, then PGN markup: always at least one [%cal Gf3e5] \
@@ -80,6 +83,17 @@ pub fn opening(game: &Game, side: Color) -> String {
     }
     let _ = write!(text, "\nFEN {}", game.fen());
     text
+}
+
+/// What the agent is told before the player's first move, so that it can talk them through
+/// what's to come. It also opens the session, as [`opening`] would.
+pub fn introduction(game: &Game, side: Color) -> String {
+    let side = if side.is_white() { "White" } else { "Black" };
+    format!(
+        "You are {side}. The player moves first. Before they do, reply with only a {{comment}} \
+         for them and markup if it helps, no move of your own.\nFEN {}",
+        game.fen()
+    )
 }
 
 /// What the agent is told on later turns: the reply to its move, and the FEN, which
@@ -184,6 +198,14 @@ mod tests {
         // Without comments or in English, it costs nothing.
         assert_eq!(system(false, Some("Deutsch")), PLAY);
         assert_eq!(review_system(None), REVIEW);
+    }
+
+    #[test]
+    fn an_introduction_names_the_side_and_asks_for_no_move() {
+        let text = introduction(&Game::default(), Color::Black);
+        assert!(text.starts_with("You are Black. The player moves first."));
+        assert!(text.contains("{comment}"));
+        assert!(text.ends_with(&format!("FEN {}", Game::default().fen())));
     }
 
     #[test]

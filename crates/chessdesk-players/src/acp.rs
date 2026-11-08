@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use shakmaty::{Color, Position};
 
-use crate::{Decision, Opponent, PlayerError, Tokens, adapters, prompt, reply};
+use crate::{Decision, Intro, Opponent, PlayerError, Tokens, adapters, prompt, reply};
 
 /// How hard an agent thinks about a move. More effort plays better and costs more.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,6 +488,8 @@ async fn prompt_once(
 pub struct AgentOpponent {
     session: Session,
     side: Color,
+    /// Whether it coaches: only then has it something to say before the first move.
+    annotate: bool,
     /// Whether the session has been told the game so far.
     started: bool,
     /// The instructions the session has heard.
@@ -502,6 +504,7 @@ impl AgentOpponent {
                 prompt::system(annotate, config.reply_language.as_deref()),
             ),
             side,
+            annotate,
             started: false,
             told: String::new(),
         }
@@ -564,6 +567,25 @@ impl Opponent for AgentOpponent {
         let text = prompt::with_instructions(text, instructions, &self.told);
         instructions.clone_into(&mut self.told);
         ask_for_move(&self.session, text, &position)
+    }
+
+    fn introduce(&mut self, game: &Game, instructions: &str) -> Result<Option<Intro>, PlayerError> {
+        if !self.annotate || self.started {
+            return Ok(None);
+        }
+        // Told its side and the position here, the session takes the player's first move
+        // as a turn like any other.
+        self.started = true;
+        let instructions = instructions.trim();
+        let text = prompt::introduction(game, self.side);
+        let text = prompt::with_instructions(text, instructions, &self.told);
+        instructions.clone_into(&mut self.told);
+        let (reply, tokens) = self.session.ask(text)?;
+        let annotations = reply::remark(&reply, &game.position());
+        Ok((!annotations.is_empty()).then_some(Intro {
+            annotations,
+            tokens,
+        }))
     }
 }
 

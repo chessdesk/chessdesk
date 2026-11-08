@@ -1,5 +1,5 @@
-//! The dialog shown before a game: who plays, how strong and how fast, and what an
-//! agent may spend.
+//! The dialog shown before a game: what kind of game, who plays, how strong and how fast,
+//! and what an agent may spend.
 
 use std::rc::Rc;
 
@@ -7,25 +7,52 @@ use chessdesk_core::Game;
 use chessdesk_players::acp::{AgentKind, Effort, Models};
 use chessdesk_players::download::MAIA_LEVELS;
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, MouseButton, Pixels, SharedString,
-    Subscription, Window, div, prelude::*, px,
+    AnyElement, App, Axis, Context, Div, Entity, EventEmitter, MouseButton, Pixels, SharedString,
+    Subscription, Window, div, prelude::*, px, transparent_black,
 };
 
 use crate::combobox::{self, Combobox};
 use crate::i18n::{tr, tr_with};
 use crate::installs::{self, Installs, NeedsStockfish};
 use crate::models::{Catalog, Offer};
+use crate::scenario;
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
-use crate::setup::{OpponentKind, Setup, Side, effort_label, maia_strength};
+use crate::setup::{Mode, OpponentKind, Setup, Side, Speed, effort_label, maia_strength};
 use crate::text_area::TextArea;
-use crate::ui::{self, Logo};
+use crate::ui::{self, Icon, Logo};
 
-const DIALOG_WIDTH: Pixels = px(460.);
+/// The form's width, beside the modes.
+const FORM_WIDTH: Pixels = px(468.);
+const SIDEBAR_WIDTH: Pixels = px(228.);
 /// `UCI_Elo` runs from 1320 to 3190. Past the last stop it plays at full strength.
 const ELO_LEVELS: [u32; 10] = [1320, 1500, 1700, 1900, 2100, 2300, 2500, 2700, 2900, 3100];
 /// Minutes each and seconds per move, for the clock's list.
 const TIME_CONTROLS: [(u32, u32); 5] = [(0, 0), (5, 0), (10, 0), (15, 10), (30, 0)];
+/// The clocks of a competition, fastest first, laid out in rows.
+const COMPETITION_CLOCKS: [(u32, u32); 12] = [
+    (1, 0),
+    (2, 1),
+    (3, 0),
+    (3, 2),
+    (5, 0),
+    (5, 3),
+    (10, 0),
+    (10, 5),
+    (15, 10),
+    (30, 0),
+    (30, 20),
+    (90, 30),
+];
+const CLOCKS_PER_ROW: usize = 4;
+const MODES: [Mode; 3] = [Mode::Casual, Mode::Competition, Mode::Scenario];
+/// How faded a mode that isn't ready yet is.
+const NOT_READY_OPACITY: f32 = 0.5;
+
+/// Whether a mode can be picked yet: scenarios are still to come.
+fn ready(mode: Mode) -> bool {
+    mode != Mode::Scenario
+}
 const BUDGETS: [Option<u64>; 4] = [None, Some(50_000), Some(200_000), Some(1_000_000)];
 
 /// What the dialog tells the app.
@@ -141,6 +168,25 @@ fn side_label(side: Side) -> SharedString {
     })
 }
 
+fn mode_labels(mode: Mode) -> (SharedString, SharedString, Icon) {
+    let (label, hint, icon) = match mode {
+        Mode::Casual => ("mode-casual", "mode-casual-hint", Icon::Logo),
+        Mode::Competition => ("mode-competition", "mode-competition-hint", Icon::ChessKing),
+        Mode::Scenario => ("mode-scenario", "mode-scenario-hint", Icon::ChessRook),
+    };
+    let hint = if ready(mode) { hint } else { "coming-soon" };
+    (tr(label), tr(hint), icon)
+}
+
+fn speed_label(speed: Speed) -> SharedString {
+    tr(match speed {
+        Speed::Bullet => "speed-bullet",
+        Speed::Blitz => "speed-blitz",
+        Speed::Rapid => "speed-rapid",
+        Speed::Classical => "speed-classical",
+    })
+}
+
 fn time_label(minutes: u32, increment: u32) -> SharedString {
     match (minutes, increment) {
         (0, _) => tr("no-clock"),
@@ -176,11 +222,17 @@ fn nearest_stop(levels: &[u32], level: u32) -> usize {
 
 impl NewGame {
     pub fn new(
-        setup: Setup,
+        mut setup: Setup,
         catalog: Entity<Catalog>,
         installs: Entity<Installs>,
         cx: &mut Context<Self>,
     ) -> Self {
+        // A mode remembered from before that can't be picked yet, and the position it
+        // brought, which a casual game would otherwise start from.
+        if !ready(setup.mode) {
+            setup.mode = Mode::Casual;
+            setup.fen = None;
+        }
         let text = setup.instructions.clone();
         let catalog_changes = cx.observe(&catalog, |_, _, cx| cx.notify());
         let installs_changes = cx.observe(&installs, |_, _, cx| cx.notify());
@@ -547,11 +599,176 @@ impl NewGame {
         cx.notify();
     }
 
+    /// The kinds of game, down the dialog's side as the settings' pages are: each brings its
+    /// own rows to the form beside it.
+    fn mode_nav(&self, cx: &mut Context<Self>) -> Div {
+        let settings = Settings::get(cx);
+        let rows = MODES.into_iter().map(|mode| {
+            let (label, hint, icon) = mode_labels(mode);
+            let picked = self.setup.mode == mode;
+            // Framed when picked; the others' frame is there but unseen, so nothing shifts.
+            let edge = if picked {
+                ui::card_edge(&settings)
+            } else {
+                transparent_black()
+            };
+            let id = ("mode", mode as usize);
+            // One that isn't ready yet shows as the others do, faded and not to be pressed.
+            let row = if ready(mode) {
+                ui::list_row(id, picked, &settings).on_click(cx.listener(move |this, _, _, cx| {
+                    this.setup.set_mode(mode);
+                    this.open = None;
+                    this.combobox = None;
+                    this.error = None;
+                    cx.notify();
+                }))
+            } else {
+                div()
+                    .id(id)
+                    .flex()
+                    .w_full()
+                    .px_2()
+                    .rounded(settings.corner_radius)
+                    .opacity(NOT_READY_OPACITY)
+            };
+            row.h_auto()
+                .border_1()
+                .border_color(edge)
+                .items_center()
+                .gap_3()
+                .py_1p5()
+                .text_color(settings.colors.text)
+                .child(ui::icon(icon, settings.ui_font_size, settings.colors.text))
+                .child(
+                    div().flex().flex_col().min_w_0().child(label).child(
+                        div()
+                            .text_size(settings.ui_font_size * 0.92)
+                            .text_color(settings.colors.muted)
+                            .child(hint),
+                    ),
+                )
+        });
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(SIDEBAR_WIDTH)
+            .p_2()
+            .gap_0p5()
+            .children(rows)
+    }
+
+    /// A competition's clocks as a grid, each with how fast it is beneath it.
+    fn clock_grid(setup: &Setup, cx: &mut Context<Self>) -> AnyElement {
+        let settings = Settings::get(cx);
+        let current = (setup.minutes, setup.increment);
+        let tile = |index: usize, (minutes, increment): (u32, u32)| {
+            let picked = current == (minutes, increment);
+            let speed = Speed::of(minutes, increment).map(speed_label);
+            ui::button(("clock", index), picked, &settings)
+                .flex_1()
+                .min_w_0()
+                .flex_col()
+                .justify_center()
+                .py_1()
+                .border_1()
+                .border_color(if picked {
+                    ui::card_edge(&settings)
+                } else {
+                    settings.colors.popover_border
+                })
+                .child(
+                    div()
+                        .text_color(settings.colors.text)
+                        .child(format!("{minutes}+{increment}")),
+                )
+                .children(
+                    speed.map(|speed| div().text_size(settings.ui_font_size * 0.92).child(speed)),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.setup.minutes = minutes;
+                    this.setup.increment = increment;
+                    cx.notify();
+                }))
+        };
+        let rows = COMPETITION_CLOCKS
+            .chunks(CLOCKS_PER_ROW)
+            .enumerate()
+            .map(|(row, clocks)| {
+                let tiles = clocks
+                    .iter()
+                    .enumerate()
+                    .map(|(column, clock)| tile(row * CLOCKS_PER_ROW + column, *clock));
+                div().flex().gap_1().children(tiles)
+            })
+            .collect::<Vec<_>>();
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .py_1()
+            .child(tr("time-control"))
+            .children(rows)
+            .into_any_element()
+    }
+
+    /// The clock as a list, for games where it matters less.
+    fn clock_select(&self, setup: &Setup, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let clock = Field {
+            hint: Speed::of(setup.minutes, setup.increment).map(speed_label),
+            ..field("clock", "time-control")
+        };
+        self.select(
+            clock,
+            time_label(setup.minutes, setup.increment),
+            TIME_CONTROLS
+                .into_iter()
+                .map(|(minutes, increment)| {
+                    choice(time_label(minutes, increment), move |setup| {
+                        setup.minutes = minutes;
+                        setup.increment = increment;
+                    })
+                })
+                .collect(),
+            window,
+            cx,
+        )
+    }
+
+    /// Which position a scenario starts from, and the way to bring one's own.
+    fn scenario_rows(&self, window: &Window, cx: &mut Context<Self>) -> [AnyElement; 2] {
+        let settings = Settings::get(cx);
+        let current = self.setup.fen.as_deref().and_then(scenario::find);
+        let label = current.map_or_else(|| tr("scenario-own"), |scenario| tr(scenario.title));
+        let choices = scenario::ALL
+            .iter()
+            .map(|scenario| Choice {
+                note: Some(tr(scenario.kind.label_id())),
+                ..choice(tr(scenario.title), |setup| {
+                    setup.fen = Some(scenario.fen.to_owned());
+                    setup.side = scenario.side;
+                })
+            })
+            .collect();
+        let pick = self.select(field("scenario", "scenario"), label, choices, window, cx);
+        let paste = ui::setting_row(tr("scenario-own"), Some(tr("scenario-own-hint")), &settings)
+            .child(
+                ui::action_button("paste", tr("paste-fen"), &settings)
+                    .on_click(cx.listener(|this, _, _, cx| this.paste_fen(cx))),
+            )
+            .into_any_element();
+        [pick, paste]
+    }
+
     /// Everything to choose, top to bottom.
     fn rows(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let setup = self.setup.clone();
         let is_agent = setup.opponent.agent().is_some();
-        let mut rows = vec![self.select(
+        let mut rows = Vec::new();
+        if setup.mode == Mode::Scenario {
+            rows.extend(self.scenario_rows(window, cx));
+        }
+        rows.push(self.select(
             Field {
                 logo: logo_of(setup.opponent),
                 ..field("opponent", "opponent")
@@ -560,7 +777,7 @@ impl NewGame {
             Self::opponent_choices(),
             window,
             cx,
-        )];
+        ));
         rows.extend(self.missing_row(cx));
         rows.extend(self.strength_row(window, cx));
         rows.push(self.select(
@@ -574,23 +791,6 @@ impl NewGame {
             window,
             cx,
         ));
-        rows.push(
-            self.select(
-                field("clock", "time-control"),
-                time_label(setup.minutes, setup.increment),
-                TIME_CONTROLS
-                    .into_iter()
-                    .map(|(minutes, increment)| {
-                        choice(time_label(minutes, increment), move |setup| {
-                            setup.minutes = minutes;
-                            setup.increment = increment;
-                        })
-                    })
-                    .collect(),
-                window,
-                cx,
-            ),
-        );
         if is_agent {
             rows.push(Self::effort_row(window, cx, setup.effort));
             let budget = Field {
@@ -624,22 +824,74 @@ impl NewGame {
                     .into_any_element(),
             );
         }
-        rows.extend(self.closing_rows(window, cx));
-        rows.extend(self.stockfish_row(cx));
+        rows.push(self.mode_section(window, cx));
         rows
+    }
+
+    /// The rows that change with the mode: the clock and the help a game has.
+    fn mode_rows(
+        &self,
+        setup: &Setup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut rows = Vec::new();
+        if setup.assisted() {
+            rows.push(self.clock_select(setup, window, cx));
+            // Until scenarios are ready, a casual game is where one's own position goes.
+            if setup.mode == Mode::Casual {
+                rows.push(Self::position_row(setup, cx));
+            }
+            rows.extend(Self::help_rows(setup, window, cx));
+        } else {
+            rows.push(Self::clock_grid(setup, cx));
+        }
+        rows.extend(self.stockfish_row(setup, cx));
+        rows
+    }
+
+    /// Every mode's own rows in one cell, all but the picked one unseen: the cell is as tall
+    /// as the tallest, so the dialog keeps its height as the mode changes, and a shorter mode
+    /// leaves room above the buttons. Unseen rows aren't painted and take no clicks.
+    fn mode_section(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // The picked one last, on top, so that it has the hover.
+        let mut modes: Vec<Mode> = MODES
+            .into_iter()
+            .filter(|mode| ready(*mode) && *mode != self.setup.mode)
+            .collect();
+        modes.push(self.setup.mode);
+        let layers: Vec<_> = modes
+            .into_iter()
+            .map(|mode| {
+                let mut setup = self.setup.clone();
+                setup.set_mode(mode);
+                div()
+                    .id(("mode-rows", mode as usize))
+                    .row_start(1)
+                    .col_start(1)
+                    .flex()
+                    .flex_col()
+                    .when(mode != self.setup.mode, Styled::invisible)
+                    .children(self.mode_rows(&setup, window, cx))
+            })
+            .collect();
+        div()
+            .grid()
+            .grid_cols(1)
+            .children(layers)
+            .into_any_element()
     }
 
     /// Win likelihood and tutoring against an engine run on Stockfish: the way to it, when
     /// they're on and it isn't there. Against Stockfish itself, the opponent's card says so.
-    fn stockfish_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let setup = &self.setup;
+    fn stockfish_row(&self, setup: &Setup, cx: &mut Context<Self>) -> Option<AnyElement> {
         let settings = Settings::get(cx);
         if setup.opponent == OpponentKind::Stockfish
             || OpponentKind::Stockfish.missing(&settings).is_none()
         {
             return None;
         }
-        let need = NeedsStockfish::of(setup.live_likelihood, setup.grades_moves())?;
+        let need = NeedsStockfish::of(setup.shows_likelihood(), setup.grades_moves())?;
         Some(
             installs::stockfish_notice(need, &self.installs, cx)
                 .mt_1()
@@ -647,9 +899,8 @@ impl NewGame {
         )
     }
 
-    /// The rows every opponent has, at the end of the dialog.
-    fn closing_rows(&self, window: &mut Window, cx: &mut Context<Self>) -> [AnyElement; 3] {
-        let setup = &self.setup;
+    /// The help a game can have, at the end of the dialog.
+    fn help_rows(setup: &Setup, window: &mut Window, cx: &mut Context<Self>) -> [AnyElement; 2] {
         let tutoring = tr(if setup.opponent.agent().is_some() {
             "tutoring-hint-agent"
         } else {
@@ -665,7 +916,6 @@ impl NewGame {
                 window,
                 cx,
             ),
-            self.position_row(cx),
             Self::switch(
                 "likelihood",
                 tr("show-likelihood"),
@@ -678,9 +928,9 @@ impl NewGame {
         ]
     }
 
-    fn position_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn position_row(setup: &Setup, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
-        let custom = self.setup.fen.is_some();
+        let custom = setup.fen.is_some();
         let hint = tr(if custom {
             "position-custom"
         } else {
@@ -759,20 +1009,30 @@ impl NewGame {
 impl Render for NewGame {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = Settings::get(cx);
+        let nav = self.mode_nav(cx);
         let rows = self.rows(window, cx);
         let buttons = self.buttons(cx);
+        let form = div()
+            .flex()
+            .flex_col()
+            .w(FORM_WIDTH)
+            .p_5()
+            .child(ui::title(tr("new-game"), &settings))
+            .children(rows)
+            .child(buttons);
 
         ui::fade_in(
             "new-game-shade",
             ui::modal("new-game", &settings).child(ui::rise_in(
                 "new-game-in",
                 ui::dialog(window, &settings)
-                    .w(DIALOG_WIDTH)
-                    .p_4()
+                    .p_0()
+                    .flex()
+                    .flex_row()
                     .text_color(settings.colors.text)
-                    .child(ui::title(tr("new-game"), &settings))
-                    .children(rows)
-                    .child(buttons),
+                    .child(nav)
+                    .child(ui::divider_line(Axis::Horizontal, window, &settings))
+                    .child(form),
             )),
         )
     }
@@ -815,6 +1075,7 @@ mod tests {
     fn labels_read_naturally() {
         assert_eq!(time_label(0, 0), "No clock");
         assert_eq!(time_label(15, 10), "15 minutes + 10 s");
+        assert_eq!(speed_label(Speed::Blitz), "Blitz");
         assert_eq!(budget_label(None), "No limit");
         assert_eq!(budget_label(Some(200_000)), "200k tokens");
         assert_eq!(budget_label(Some(1_000_000)), "1M tokens");

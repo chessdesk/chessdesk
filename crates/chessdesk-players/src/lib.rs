@@ -66,8 +66,27 @@ impl fmt::Display for PlayerError {
 
 impl std::error::Error for PlayerError {}
 
+/// What an opponent says before the first move, when the player has it: words and markings
+/// on the starting position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Intro {
+    pub annotations: Annotations,
+    pub tokens: Option<Tokens>,
+}
+
 /// Anything that can choose a move: an engine or an agent.
 pub trait Opponent: Send {
     /// `instructions` are the player's own words on how to play, which agents heed.
     fn next_move(&mut self, game: &Game, instructions: &str) -> Result<Decision, PlayerError>;
+
+    /// Has the opponent speak before the player's first move: how an agent that coaches
+    /// can set out what's to come, such as an opening it was asked to teach. Engines have
+    /// nothing to say.
+    fn introduce(
+        &mut self,
+        _game: &Game,
+        _instructions: &str,
+    ) -> Result<Option<Intro>, PlayerError> {
+        Ok(None)
+    }
 }

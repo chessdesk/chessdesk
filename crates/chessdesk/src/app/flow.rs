@@ -12,13 +12,14 @@ use chessdesk_players::acp::{AgentConfig, AgentKind, Effort, hint, review_game};
 use chessdesk_players::adapters::{self, Readiness};
 use chessdesk_players::analysis::evaluate_game;
 use chessdesk_players::uci::{Engine, EngineConfig, Limit};
-use chessdesk_players::{Decision, Opponent, PlayerError, Tokens};
+use chessdesk_players::{Decision, Intro, Opponent, PlayerError, Tokens};
 use gpui::{AppContext, Context, PathPromptOptions};
+use shakmaty::san::SanPlus;
 use shakmaty::{Color, KnownOutcome, Move, Outcome, Position, Role, Square};
 
 use super::Chessdesk;
 use super::clock::Clock;
-use super::session::{Live, Promotion, Session, SessionId, Suggestion};
+use super::session::{HintNote, INTRO_TAG, Live, Promotion, Session, SessionId, Suggestion};
 use crate::audio;
 use crate::board::{SLIDE_TIME, Slide, slide_paths, slide_pieces};
 use crate::i18n::{self, tr, tr_with};
@@ -173,6 +174,7 @@ impl Chessdesk {
             evaluator: None,
             evaluating: false,
             instructions: None,
+            introduced: false,
             setup,
         });
         // The empty board from before any game has served its purpose.
@@ -313,7 +315,20 @@ impl Chessdesk {
         let Some(live) = &mut session.live else {
             return;
         };
-        if position.turn() == live.player || live.thinking || live.paused.is_some() {
+        if live.thinking || live.paused.is_some() {
+            return;
+        }
+        if position.turn() == live.player {
+            // Before the player's first move, a coaching agent gets its say: an opponent
+            // with Black would otherwise be silent until the player had moved.
+            let introduces = !live.introduced
+                && game.moves().is_empty()
+                && game.tag(INTRO_TAG).is_none()
+                && live.setup.opponent.agent().is_some()
+                && live.setup.tutoring();
+            if introduces {
+                self.ask_intro(id, cx);
+            }
             return;
         }
         if let (Some(budget), Some(tokens)) = (live.setup.token_budget, tokens)
@@ -356,6 +371,85 @@ impl Chessdesk {
             .ok();
         })
         .detach();
+    }
+
+    /// Has the opponent speak before the player's first move. The player waits for it as
+    /// for a move: it's about the position they're to move in.
+    fn ask_intro(&mut self, id: SessionId, cx: &mut Context<Self>) {
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        let game = session.game.clone();
+        let Some(live) = &mut session.live else {
+            return;
+        };
+        live.introduced = true;
+        live.thinking = true;
+        let mut opponent = live.opponent.take();
+        let plan = live.plan.clone();
+        let version = live.plan_version;
+        let instructions = live.setup.instructions.clone();
+        cx.spawn(async move |this, cx| {
+            let (opponent, intro) = cx
+                .background_spawn(async move {
+                    let started = match opponent.take() {
+                        Some(opponent) => Ok(opponent),
+                        None => plan.start(),
+                    };
+                    match started {
+                        Ok(mut opponent) => {
+                            let intro = opponent.introduce(&game, &instructions);
+                            (Some(opponent), intro)
+                        }
+                        Err(error) => (None, Err(error)),
+                    }
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.on_intro(id, version, opponent, intro, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Keeps what the opponent said before the first move, in the game so that it's saved.
+    /// On a failure the game goes on without it: it's no reason to stop.
+    fn on_intro(
+        &mut self,
+        id: SessionId,
+        version: u64,
+        opponent: Option<Box<dyn Opponent>>,
+        intro: Result<Option<Intro>, PlayerError>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session_mut(id) else {
+            return;
+        };
+        let Some(live) = &mut session.live else {
+            return;
+        };
+        live.thinking = false;
+        live.opponent = opponent.filter(|_| version == live.plan_version);
+        match intro {
+            Ok(Some(intro)) => {
+                if let Some(tokens) = intro.tokens {
+                    *session.tokens.get_or_insert_default() += tokens;
+                }
+                // A tag is one line.
+                let comment = intro.annotations.to_comment();
+                let comment = comment.split_whitespace().collect::<Vec<_>>().join(" ");
+                session.game.set_tag(INTRO_TAG, comment);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                // Still busy with what it was asked: its first move starts a new session.
+                live.opponent = None;
+                let name = live.setup.opponent.name();
+                self.report(format!("{name}: {error}"), cx);
+            }
+        }
+        self.after_change(id, cx);
     }
 
     /// What the opponent decided, asked at the game's `epoch` with the plan's `version`.
@@ -805,7 +899,7 @@ impl Chessdesk {
         let Some(live) = &session.live else {
             return;
         };
-        if live.thinking || session.suggesting {
+        if live.thinking || session.suggesting || !live.setup.assisted() {
             return;
         }
         // Back to the player's own turn.
@@ -926,9 +1020,15 @@ impl Chessdesk {
                 if let Some(tokens) = best.as_ref().and_then(|best| best.tokens) {
                     *session.tokens.get_or_insert_default() += tokens;
                 }
+                let position = session.game.position_at(ply);
                 session.suggestion = best.and_then(|best| {
                     let (from, to) = slide_paths(best.played).first().copied()?;
                     let text = best.annotations.text;
+                    let note = (!text.is_empty()).then(|| HintNote {
+                        by,
+                        san: SanPlus::from_move(position, best.played).to_string(),
+                        text,
+                    });
                     Some(Suggestion {
                         ply,
                         arrow: Arrow {
@@ -936,8 +1036,7 @@ impl Chessdesk {
                             to,
                             mark: Mark::Blue,
                         },
-                        note: (!text.is_empty())
-                            .then(|| tr_with!("hint-note", agent = by, text = text)),
+                        note,
                     })
                 });
             }
@@ -952,6 +1051,7 @@ impl Chessdesk {
         if let Some(live) = self
             .session_mut(id)
             .and_then(|session| session.live.as_mut())
+            .filter(|live| live.setup.assisted())
         {
             live.setup.live_likelihood = !live.setup.live_likelihood;
             self.evaluate_live(id, cx);
@@ -1099,6 +1199,7 @@ impl Chessdesk {
                 evaluator: None,
                 evaluating: false,
                 instructions: None,
+                introduced: false,
                 setup: meta.setup,
             });
         }

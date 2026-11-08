@@ -92,6 +92,18 @@ impl Annotations {
         }
     }
 
+    /// The text and markings as one comment without its braces, as [`parse`] reads it back.
+    pub fn to_comment(&self) -> String {
+        // A closing brace ends a comment, and PGN has no way to escape it.
+        let text = self.text.replace(['{', '}'], "");
+        let mut parts: Vec<String> = Some(text)
+            .filter(|text| !text.is_empty())
+            .into_iter()
+            .collect();
+        parts.extend(self.commands());
+        parts.join(" ")
+    }
+
     /// The `[%csl ..]` and `[%cal ..]` commands, without the text.
     pub(crate) fn commands(&self) -> Vec<String> {
         let mut commands = Vec::new();
@@ -177,6 +189,13 @@ mod tests {
     use shakmaty::Square::{D4, E2, E4, E5};
 
     use super::*;
+
+    #[test]
+    fn a_comment_reads_back_as_it_was_written() {
+        let written = parse("Watch d5 [%cal Ge2e4] [%csl Rd4,Ye5]");
+        assert_eq!(parse(&written.to_comment()), written);
+        assert_eq!(Annotations::default().to_comment(), "");
+    }
 
     #[test]
     fn reads_markings_and_text() {

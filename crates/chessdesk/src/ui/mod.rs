@@ -12,8 +12,8 @@ use gpui::{
     Animation, AnimationElement, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context,
     Corner, CursorStyle, DispatchPhase, Div, ElementId, Hitbox, HitboxBehavior, Hsla, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Stateful,
-    Transformation, Window, anchored, canvas, deferred, div, ease_out_quint, fill, percentage,
-    point, prelude::*, px, relative, size, white,
+    Transformation, Window, anchored, black, canvas, deferred, div, ease_out_quint, fill,
+    percentage, point, prelude::*, px, relative, size, white,
 };
 
 use crate::settings::Settings;
@@ -56,6 +56,8 @@ pub const FLAT_RADIUS_SCALE: f32 = 0.7;
 pub const CARD_TINT: f32 = 0.16;
 /// How strongly a card's details show, next to its main line.
 pub const CARD_DETAIL: f32 = 0.75;
+/// How far a card's edge is off its fill: barely, enough to settle it on the page.
+const CARD_EDGE: f32 = 0.03;
 /// How much of the text colour lifts a notice's button off its card, and again on hover.
 const NOTICE_BUTTON_RAISE: f32 = 0.08;
 /// A setting's description, against its font size: closer than GPUI's default, so that
@@ -408,6 +410,13 @@ fn labelled_row(label: Div) -> Div {
 
 /// Something to see to before going on, such as an engine to fetch: a card in the theme's
 /// own colours, its message and a quieter detail beside room for an action, added as a child.
+/// The edge of a card or callout: a shade lighter than its fill in a dark theme, a shade
+/// darker in a light one. See-through, so that it works on any tint.
+pub fn card_edge(settings: &Settings) -> Hsla {
+    let light = settings.colors.background.l > 0.5;
+    if light { black() } else { white() }.opacity(CARD_EDGE)
+}
+
 pub fn notice(
     message: impl Into<SharedString>,
     detail: Option<SharedString>,
@@ -433,6 +442,8 @@ pub fn notice(
         .py_2()
         .rounded(settings.corner_radius * FLAT_RADIUS_SCALE)
         .bg(settings.colors.accent)
+        .border_1()
+        .border_color(card_edge(settings))
         .child(text)
 }
 

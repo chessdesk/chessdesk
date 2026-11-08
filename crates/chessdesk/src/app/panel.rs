@@ -16,7 +16,7 @@ use gpui::{
 };
 use shakmaty::{Color, Position};
 
-use super::session::{Feedback, Session};
+use super::session::{Feedback, HintNote, Session};
 use super::{Chessdesk, Dragging, clock};
 
 /// A button that offers Stockfish or an agent to do its work.
@@ -169,11 +169,12 @@ pub(super) struct Folds {
 }
 
 impl Folds {
-    /// Everything open but the notes, which are there for when they're wanted.
+    /// The opponent and the likelihood open; the moves and the notes are there for when
+    /// they're wanted, and leave the opponent's words the room meanwhile.
     pub(super) fn new(now: Instant) -> Self {
+        let open = |section| matches!(section, Section::Opponent | Section::Likelihood);
         Self {
-            open: Section::ALL
-                .map(|section| Transition::settled(section != Section::Notes, FOLD, now)),
+            open: Section::ALL.map(|section| Transition::settled(open(section), FOLD, now)),
             heights: Default::default(),
         }
     }
@@ -331,6 +332,8 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
             .py_1()
             .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
             .bg(color.opacity(ui::CARD_TINT))
+            .border_1()
+            .border_color(ui::card_edge(settings))
             .text_color(color)
             .child(format!("{text}{}", ending.unwrap_or_default())),
     )
@@ -338,6 +341,42 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
 
 /// How the player's latest move rated: a card like the result's, in the verdict's colour,
 /// with what the move did to the likelihood and what would have been better.
+/// An agent's hint: a card in the blue of the hint's arrow, naming the agent and the move
+/// above what it said.
+fn render_hint(note: &HintNote, settings: &Settings) -> Div {
+    let color = settings.colors.mark(Mark::Blue);
+    let detail = color.opacity(ui::CARD_DETAIL);
+    div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .gap_0p5()
+        .px_2()
+        .py_1()
+        .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
+        .bg(color.opacity(ui::CARD_TINT))
+        .border_1()
+        .border_color(ui::card_edge(settings))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_color(color)
+                        .child(tr_with!("hint-from", agent = note.by)),
+                )
+                .child(div().text_color(detail).child(note.san.clone())),
+        )
+        .child(
+            div()
+                .text_color(settings.colors.text)
+                .child(note.text.clone()),
+        )
+}
+
 fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
     let colors = &settings.colors;
     let color = match feedback.verdict {
@@ -370,6 +409,8 @@ fn render_feedback(feedback: &Feedback, settings: &Settings) -> Div {
         .py_1()
         .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
         .bg(color.opacity(ui::CARD_TINT))
+        .border_1()
+        .border_color(ui::card_edge(settings))
         .child(
             div()
                 .flex()
@@ -531,8 +572,12 @@ impl Chessdesk {
         };
 
         let mut column = div().flex().flex_col().h_full().w(self.panel_width);
-        let (opponent_title, opponent_body) = self.render_opponent(opponent, window, cx);
-        column = column.child(opponent_title).children(opponent_body);
+        let (opponent_title, opponent_body, opponent_controls) =
+            self.render_opponent(opponent, window, cx);
+        column = column
+            .child(opponent_title)
+            .children(opponent_body)
+            .children(opponent_controls);
         if let Some(likelihood) = self.render_likelihood(window, cx) {
             column = column.child(line()).child(likelihood);
         }
@@ -734,16 +779,16 @@ impl Chessdesk {
         open: f32,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> (AnyElement, Option<Div>) {
+    ) -> (AnyElement, Option<Div>, Option<Div>) {
         let settings = Settings::get(cx);
         let settings = &settings;
         let session = self.session();
         if session.is_blank() {
-            return (ui::empty_panel(settings).into_any_element(), None);
+            return (ui::empty_panel(settings).into_any_element(), None, None);
         }
         let title = section(settings).child(self.render_opponent_title(cx));
         if self.folds.is_folded(Section::Opponent, Instant::now()) {
-            return (title.into_any_element(), None);
+            return (title.into_any_element(), None, None);
         }
         let muted = settings.colors.muted;
         let time = |color: Color| {
@@ -777,10 +822,6 @@ impl Chessdesk {
                     .child(div().text_color(muted).child(tr("agent-instructions")))
                     .child(area.clone())
             });
-        let hint_note = session
-            .shown_suggestion()
-            .and_then(|suggestion| suggestion.note.clone())
-            .map(|note| div().text_color(muted).child(note));
         let effort = session
             .live
             .as_ref()
@@ -802,19 +843,21 @@ impl Chessdesk {
                     .map(|feedback| render_feedback(&feedback, settings)),
             )
             .children(comment.map(|text| render_bubble(text, settings)))
-            .children(hint_note)
             .children(paused.map(|reason| div().text_color(settings.colors.callout).child(reason)));
-        let holds = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .child(said)
-            .children(instructions)
-            .children(effort);
-        let body =
-            shared_body(open * (1. - LOG_SHARE), holds).child(measure(&self.log_space.spare));
-        (title.into_any_element(), Some(body))
+        let body = shared_body(open * (1. - LOG_SHARE), said).child(measure(&self.log_space.spare));
+        // Below what was said and outside its share of the room, so that they never squeeze
+        // it to a line. They come back once the section has unfolded all the way.
+        let controls = (open >= 1. && (instructions.is_some() || effort.is_some())).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .px_3()
+                .pb_2()
+                .children(instructions)
+                .children(effort)
+        });
+        (title.into_any_element(), Some(body), controls)
     }
 
     fn render_likelihood(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
@@ -1131,7 +1174,12 @@ impl Chessdesk {
         let wide = |id: &'static str, label: &'static str| {
             ui::action_button(id, tr(label), &settings).w_full()
         };
-        let mut buttons = section(&settings);
+        // An agent's hint, right above the button that asked for it.
+        let hint_note = session
+            .shown_suggestion()
+            .and_then(|suggestion| suggestion.note.as_ref())
+            .map(|note| render_hint(note, &settings));
+        let mut buttons = section(&settings).children(hint_note);
         // What the engine would play, for the position on show.
         let suggest = |label: &'static str, cx: &mut Context<Self>| {
             if session.suggesting {
@@ -1145,8 +1193,17 @@ impl Chessdesk {
             }
         };
         if let Some(live) = &session.live {
-            let first = if live.paused.is_some() {
+            let resign =
+                wide("resign", "resign").on_click(cx.listener(|this, _, _, cx| this.resign(cx)));
+            let resume = live.paused.is_some().then(|| {
                 wide("resume", "continue").on_click(cx.listener(|this, _, _, cx| this.resume(cx)))
+            });
+            // A competition has no help to offer: no hint, no take-back.
+            if !live.setup.assisted() {
+                return buttons.children(resume).child(resign);
+            }
+            let first = if let Some(resume) = resume {
+                resume
             } else if live.thinking || session.suggesting {
                 // The answer under way is for the position on the board.
                 ui::disabled_button("take-back", tr("take-back"), &settings).w_full()
@@ -1175,9 +1232,7 @@ impl Chessdesk {
                     .w_full()
                     .into_any_element()
             };
-            buttons = buttons.child(hint).child(first).child(
-                wide("resign", "resign").on_click(cx.listener(|this, _, _, cx| this.resign(cx))),
-            );
+            buttons = buttons.child(hint).child(first).child(resign);
         } else {
             let played = !session.game.moves().is_empty();
             let optimal = played.then(|| suggest("optimal-move", cx));
