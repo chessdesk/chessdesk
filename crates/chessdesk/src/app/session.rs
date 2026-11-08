@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use chessdesk_core::review::Verdict;
 use chessdesk_core::{Annotations, Arrow, Game, Wdl};
+use chessdesk_players::acp::AgentKind;
 use chessdesk_players::uci::Engine;
 use chessdesk_players::{Opponent, Tokens};
 use gpui::{Entity, SharedString, Subscription};
@@ -72,7 +73,8 @@ pub struct Session {
     pub tokens: Option<Tokens>,
     /// Moves analysed and moves in all, while a review runs.
     pub analysis: Option<(usize, usize)>,
-    pub agent_review: bool,
+    /// The agent reviewing the game, while it does.
+    pub reviewer: Option<AgentKind>,
     /// Pieces gliding to their squares right now. A quick reply starts while the move
     /// before it is still under way, so there can be several.
     pub slides: Vec<Slide>,
@@ -117,7 +119,7 @@ impl Session {
             path: None,
             tokens: None,
             analysis: None,
-            agent_review: false,
+            reviewer: None,
             slides: Vec::new(),
             suggestion: None,
             suggesting: false,
@@ -154,6 +156,20 @@ impl Session {
     }
 
     /// Who the player faces: the engine or the agent and its model.
+    /// What takes a while in this game, for the title bar: an agent at work, or a review.
+    /// Engines answer too quickly for it to be worth showing.
+    pub fn activity(&self) -> Option<SharedString> {
+        if let Some(kind) = self.reviewer {
+            return Some(tr_with!("activity-reviewing", agent = kind.name()));
+        }
+        if let Some((done, all)) = self.analysis {
+            return Some(tr_with!("activity-analyzing", done = done, all = all));
+        }
+        let live = self.live.as_ref().filter(|live| live.thinking)?;
+        let agent = live.setup.opponent.agent()?;
+        Some(tr_with!("activity-thinking", agent = agent.name()))
+    }
+
     pub fn opponent_name(&self) -> String {
         if let Some(live) = &self.live {
             return live.setup.opponent_name();

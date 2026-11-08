@@ -1091,7 +1091,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        if session.live.is_some() || session.agent_review {
+        if session.live.is_some() || session.reviewer.is_some() {
             return;
         }
         if session.game.moves().is_empty() {
@@ -1104,7 +1104,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        session.agent_review = true;
+        session.reviewer = Some(kind);
         let mut game = session.game.clone();
         cx.notify();
         let config = AgentConfig {
@@ -1135,7 +1135,7 @@ impl Chessdesk {
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        session.agent_review = false;
+        session.reviewer = None;
         match reviewed {
             Ok((_, 0, _)) => self.report(tr("review-empty"), cx),
             Ok((mut game, _, tokens)) => {

@@ -60,8 +60,8 @@ Scripts the interface font lacks come from the system's fonts.
 
 A theme file needs `background`, `accent`, `popover`, `popover_border`, `text`, `muted`, `caret`,
 `callout` and 16 `ansi` colours, of which red, green, yellow and blue draw markings. `board_light`
-and `board_dark` are optional. Other keys are ignored, so colour themes from
-[calm](../crates/chessdesk/assets/themes/dark.toml)'s format work as they are.
+and `board_dark` are optional; other keys are ignored. The
+[built-in dark theme](../crates/chessdesk/assets/themes/dark.toml) is a complete example.
 
 | Plugin | Brings | Licence |
 |---|---|---|

@@ -4,9 +4,9 @@ use std::rc::Rc;
 
 use chessdesk_players::acp::AgentKind;
 use gpui::{
-    Action, AnyElement, ClipboardItem, Context, Div, MouseButton, MouseDownEvent, MouseMoveEvent,
-    Pixels, SharedString, Window, WindowControlArea, anchored, deferred, div, img, point,
-    prelude::*, px,
+    Action, AnyElement, App, ClipboardItem, Context, Div, MouseButton, MouseDownEvent,
+    MouseMoveEvent, Pixels, SharedString, Window, WindowControlArea, anchored, deferred, div, img,
+    point, prelude::*, px,
 };
 use shakmaty::{Piece, Position, Role};
 
@@ -27,6 +27,8 @@ const LOGO_HEIGHT: Pixels = px(11.);
 /// The room the macOS window buttons take at the left of the bar, placed by `main`.
 const TRAFFIC_LIGHTS_WIDTH: Pixels = px(72.);
 const PROMOTION_SIZE: Pixels = px(64.);
+/// The widest the loading bar gets, in the room between the menus and the window controls.
+const LOADING_BAR_WIDTH: Pixels = px(360.);
 /// The menus, as the ids of their titles.
 const MENUS: [&str; 3] = ["menu-game", "menu-review", "menu-view"];
 /// The menu behind the logo, after the others among the open menus.
@@ -216,13 +218,25 @@ impl Chessdesk {
             .child(line)
             .child(menus);
 
-        // The only draggable part: anything over it would swallow clicks on Windows.
+        // The only draggable part: anything over it would swallow clicks on Windows. The
+        // loading bar inside takes no clicks, so the window drags by it too.
+        let loading = self.activity(cx).map(|status| {
+            div()
+                .flex_1()
+                .max_w(LOADING_BAR_WIDTH)
+                .h_full()
+                .child(ui::loading_bar("activity", status, &settings))
+        });
         bar = bar.child(
             div()
+                .flex()
                 .flex_1()
                 .min_w_0()
                 .h_full()
-                .window_control_area(WindowControlArea::Drag),
+                .px_4()
+                .justify_center()
+                .window_control_area(WindowControlArea::Drag)
+                .children(loading),
         );
         if cfg!(windows) {
             bar = bar.child(window_controls(&settings, window.is_maximized()));
@@ -234,6 +248,19 @@ impl Chessdesk {
             .child(bar)
             .child(ui::horizontal_line(window, &settings))
             .into_any_element()
+    }
+
+    /// What takes a while right now: in the game on show first, then in the others, then
+    /// what's being installed.
+    fn activity(&self, cx: &App) -> Option<SharedString> {
+        let mut others = self
+            .sessions
+            .iter()
+            .filter(|session| session.id != self.active);
+        self.session()
+            .activity()
+            .or_else(|| others.find_map(Session::activity))
+            .or_else(|| self.installs.0.read(cx).activity())
     }
 
     /// The logo, the name and what's behind them: all of it one button.

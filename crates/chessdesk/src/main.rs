@@ -7,6 +7,7 @@ mod board;
 mod bundled;
 mod export;
 mod i18n;
+mod installs;
 mod library;
 mod new_game;
 mod onboarding;

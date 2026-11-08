@@ -53,6 +53,14 @@ open = Öffnen
 rename = Umbenennen
 install = Installieren
 
+## Work under way, in the title bar
+
+activity-thinking = { $agent } denkt nach
+activity-reviewing = { $agent } kommentiert die Partie
+activity-analyzing = Analyse mit Stockfish, Zug { $done } von { $all }
+activity-downloading = { $engine } wird heruntergeladen, { $percent } %
+activity-installing = Der Adapter für { $agent } wird installiert
+
 ## Game history
 
 move-count =
@@ -152,8 +160,8 @@ page-plugins = Plugins
 language = Sprache
 language-system = System ({ $language })
 theme = Farbschema
-theme-dark = Dunkel
-theme-light = Hell
+theme-dark = Chessdesk Dunkel
+theme-light = Chessdesk Hell
 pieces = Figuren
 font-size = Schriftgröße
 corner-radius = Eckenradius

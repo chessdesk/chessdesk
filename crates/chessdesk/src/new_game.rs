@@ -70,9 +70,7 @@ fn logo_of(kind: OpponentKind) -> Option<Logo> {
     match kind {
         OpponentKind::Stockfish => Some(Logo::Stockfish),
         OpponentKind::Maia => Some(Logo::Maia),
-        OpponentKind::ClaudeCode => Some(Logo::ClaudeCode),
-        OpponentKind::Codex => Some(Logo::Codex),
-        _ => None,
+        _ => kind.agent().map(Logo::of_agent),
     }
 }
 
@@ -174,11 +172,13 @@ impl NewGame {
                 ui::list_row(("choice", index), false, &settings)
                     .gap_1p5()
                     .text_color(settings.colors.text)
-                    .children(
-                        choice
-                            .logo
-                            .map(|mark| ui::logo(mark, settings.ui_font_size * ui::LOGO_SCALE)),
-                    )
+                    .children(choice.logo.map(|mark| {
+                        ui::logo(
+                            mark,
+                            settings.ui_font_size * ui::LOGO_SCALE,
+                            settings.colors.text,
+                        )
+                    }))
                     .child(div().truncate().child(choice.label))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         pick(&mut this.setup);

@@ -629,7 +629,7 @@ impl Chessdesk {
         let size = settings.ui_font_size;
         let muted = settings.colors.muted;
         let thinking = session.live.as_ref().is_some_and(|live| live.thinking);
-        let busy = thinking || session.agent_review || session.analysis.is_some();
+        let busy = thinking || session.reviewer.is_some() || session.analysis.is_some();
         let tokens = session.tokens.map(|tokens| {
             ui::tooltip(tr_with!(
                 "tokens-used",
@@ -749,6 +749,7 @@ impl Chessdesk {
                     .child(ui::logo(
                         Logo::Stockfish,
                         settings.ui_font_size * ui::LOGO_SCALE,
+                        settings.colors.text,
                     ))
                     .tooltip(ui::tooltip(tr("likelihood-source"))),
             );
@@ -921,7 +922,7 @@ impl Chessdesk {
     fn render_analyze(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let settings = Settings::get(cx);
         let session = self.session();
-        if session.analysis.is_some() || session.agent_review {
+        if session.analysis.is_some() || session.reviewer.is_some() {
             return ui::busy_button("analyze", tr("analyze"), &settings)
                 .w_full()
                 .into_any_element();
@@ -943,6 +944,7 @@ impl Chessdesk {
                 .child(ui::logo(
                     Logo::Stockfish,
                     settings.ui_font_size * ui::LOGO_SCALE,
+                    settings.colors.text,
                 ))
                 .child("Stockfish")
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -955,17 +957,14 @@ impl Chessdesk {
                 .filter(|kind| adapters::readiness(*kind, &folder) == Readiness::Ready)
                 .enumerate()
                 .map(|(index, kind)| {
-                    let mark = match kind {
-                        AgentKind::ClaudeCode => Some(Logo::ClaudeCode),
-                        AgentKind::Codex => Some(Logo::Codex),
-                        _ => None,
-                    };
                     ui::list_row(("analyze-agent", index), false, &settings)
                         .gap_1p5()
                         .text_color(settings.colors.text)
-                        .children(
-                            mark.map(|mark| ui::logo(mark, settings.ui_font_size * ui::LOGO_SCALE)),
-                        )
+                        .child(ui::logo(
+                            Logo::of_agent(kind),
+                            settings.ui_font_size * ui::LOGO_SCALE,
+                            settings.colors.text,
+                        ))
                         .child(kind.name())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.analyze_menu = false;

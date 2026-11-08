@@ -11,10 +11,10 @@ use std::rc::Rc;
 
 use gpui::{
     Animation, AnimationElement, AnimationExt, AnyView, App, Axis, Bounds, ClickEvent, Context,
-    Corner, CursorStyle, DispatchPhase, Div, ElementId, Hsla, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful, Transformation, Window, anchored,
-    canvas, deferred, div, ease_out_quint, fill, percentage, point, prelude::*, px, size,
-    transparent_black,
+    Corner, CursorStyle, DispatchPhase, Div, ElementId, Hitbox, HitboxBehavior, Hsla, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Stateful,
+    Transformation, Window, anchored, canvas, deferred, div, ease_out_quint, fill, percentage,
+    point, prelude::*, px, size, transparent_black,
 };
 
 use crate::settings::Settings;
@@ -46,6 +46,8 @@ pub const BAR_HEIGHT: Pixels = ROW_HEIGHT;
 pub const BAR_INSET: Pixels = px(17.);
 /// How much larger logos are than the text beside them.
 pub const LOGO_SCALE: f32 = 1.25;
+/// How much larger a settings row's logo is than its text: about as tall as label and hint.
+const SETTING_LOGO_SCALE: f32 = 2.;
 /// How much larger titles are than the text around them.
 const TITLE_SCALE: f32 = 1.3;
 /// One turn of a [`spinner`].
@@ -355,7 +357,34 @@ pub fn setting_row(
     hint: Option<SharedString>,
     settings: &Settings,
 ) -> Div {
-    let text = div()
+    labelled_row(setting_label(label, hint, settings))
+}
+
+/// A [`setting_row`] with a logo before its label and hint, centred beside both.
+pub fn logo_setting_row(
+    mark: Logo,
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let size = settings.ui_font_size * SETTING_LOGO_SCALE;
+    labelled_row(
+        div()
+            .flex()
+            .items_center()
+            .gap_2p5()
+            .min_w_0()
+            .child(logo(mark, size, settings.colors.text))
+            .child(setting_label(label, hint, settings)),
+    )
+}
+
+fn setting_label(
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    settings: &Settings,
+) -> Div {
+    div()
         .flex()
         .flex_col()
         .min_w_0()
@@ -365,7 +394,10 @@ pub fn setting_row(
                 .text_size(settings.ui_font_size * 0.92)
                 .text_color(settings.colors.muted)
                 .child(hint)
-        }));
+        }))
+}
+
+fn labelled_row(label: Div) -> Div {
     div()
         .flex()
         .items_center()
@@ -373,7 +405,7 @@ pub fn setting_row(
         .gap_4()
         .min_h(ROW_HEIGHT)
         .py_1()
-        .child(text)
+        .child(label)
 }
 
 /// A switch. Add `on_click`.
@@ -460,7 +492,7 @@ pub fn select_button(
                 .min_w_0()
                 .items_center()
                 .gap_1p5()
-                .children(mark.map(|mark| logo(mark, size * LOGO_SCALE)))
+                .children(mark.map(|mark| logo(mark, size * LOGO_SCALE, settings.colors.text)))
                 .child(div().truncate().child(label.into())),
         )
         .child(icon(Icon::ChevronDown, size, settings.colors.muted))
@@ -519,6 +551,81 @@ pub fn spinner(id: impl Into<ElementId>, size: Pixels, color: Hsla) -> impl Into
         Animation::new(SPIN).repeat(),
         |icon, turned| icon.with_transformation(Transformation::rotate(percentage(turned))),
     )
+}
+
+/// From one stripe of a [`loading_bar`] to the next, half of it stripe and half gap.
+const STRIPE_PERIOD: Pixels = px(24.);
+/// How long the stripes take to move on by one period, where the pattern repeats.
+const STRIPE_SLIDE: Duration = Duration::from_millis(900);
+/// How strong the gaps between stripes are, next to the stripes' full accent.
+const STRIPE_GAP_OPACITY: f32 = 0.45;
+
+/// Slanted stripes sliding along behind `status`, for work that takes a while. It fills
+/// what holds it. `id` keeps the stripes' place across frames, as for a [`spinner`].
+pub fn loading_bar(
+    id: impl Into<ElementId>,
+    status: impl Into<SharedString>,
+    settings: &Settings,
+) -> Div {
+    let accent = settings.colors.accent;
+    let stripes = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .with_animation(
+            id,
+            Animation::new(STRIPE_SLIDE).repeat(),
+            move |stripes, moved| {
+                stripes.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, (), window, _| paint_stripes(bounds, moved, accent, window),
+                    )
+                    .size_full(),
+                )
+            },
+        );
+    // Cut off without an ellipsis. Never `line_clamp` with `text_ellipsis` to get one: text
+    // measured twice keeps the first cut's length, and gpui panics if that splits a char.
+    let label = div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .text_center()
+        .child(status.into());
+    div()
+        .relative()
+        .flex()
+        .items_center()
+        .size_full()
+        .px_2()
+        .overflow_hidden()
+        .text_color(settings.colors.text)
+        .bg(accent.opacity(STRIPE_GAP_OPACITY))
+        .child(stripes)
+        .child(label)
+}
+
+/// Leans at 45 degrees, starting far enough left that no corner of `bounds` is ever bare.
+/// `moved` is how far along the period the stripes are, from 0 to 1.
+fn paint_stripes(bounds: Bounds<Pixels>, moved: f32, color: Hsla, window: &mut Window) {
+    let (top, bottom) = (bounds.top(), bounds.bottom());
+    let slant = bounds.size.height;
+    let width = STRIPE_PERIOD / 2.;
+    let mut path = PathBuilder::fill();
+    let mut left = bounds.left() - slant - STRIPE_PERIOD * (1. - moved);
+    while left < bounds.right() {
+        path.move_to(point(left, bottom));
+        path.line_to(point(left + slant, top));
+        path.line_to(point(left + slant + width, top));
+        path.line_to(point(left + width, bottom));
+        path.close();
+        left += STRIPE_PERIOD;
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, color);
+    }
 }
 
 /// A line between two panes. It takes up one pixel, so that lines meet exactly, and is
@@ -653,7 +760,7 @@ pub fn slider(
     let on_pick = Rc::new(on_pick);
     let colors = settings.colors.clone();
     let radius = settings.corner_radius;
-    let paint = move |bounds: Bounds<Pixels>, (), window: &mut Window, _: &mut App| {
+    let paint = move |bounds: Bounds<Pixels>, hitbox: Hitbox, window: &mut Window, _: &mut App| {
         // The knob's left edge travels what the track has beyond the knob's own width.
         let travel = bounds.size.width - SLIDER_KNOB;
         let target = index as f32;
@@ -703,7 +810,8 @@ pub fn slider(
         let down = state.clone();
         let press = pick.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
+            // The hitbox, not the bounds: a list open over the slider takes its clicks.
+            if phase == DispatchPhase::Bubble && hitbox.is_hovered(window) {
                 down.pressed.set(true);
                 press(event.position.x, window, cx);
             }
@@ -727,7 +835,13 @@ pub fn slider(
         .w(SELECT_WIDTH)
         .h(SLIDER_HEIGHT)
         .cursor_pointer()
-        .child(canvas(|_, _, _| {}, paint).size_full())
+        .child(
+            canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+                paint,
+            )
+            .size_full(),
+        )
 }
 
 /// A full-width line across a window-level bar.

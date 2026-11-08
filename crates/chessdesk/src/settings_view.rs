@@ -1,27 +1,22 @@
 //! The settings page. Every control writes straight to `config.toml`, which stays the
 //! single source of truth: the file can still be edited by hand.
 
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::Duration;
-
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::adapters::{self, Readiness};
-use chessdesk_players::download::{self, can_download_lc0, can_download_stockfish};
+use chessdesk_players::download::{can_download_lc0, can_download_stockfish};
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, MouseButton, PathPromptOptions, Pixels,
-    SharedString, Window, div, prelude::*, px,
+    SharedString, Subscription, Window, div, prelude::*, px,
 };
 
 use crate::audio;
 use crate::i18n::{self, tr, tr_with};
+use crate::installs::{Engine, Installs};
 use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
 use crate::setup::{OpponentKind, title_case};
-use crate::ui;
+use crate::ui::{self, Logo};
 
 const CONTENT_WIDTH: Pixels = px(560.);
-/// How often a download's progress is looked at.
-const PROGRESS_TICK: Duration = Duration::from_millis(200);
 /// `board_size` in the file, in twentieths: from half the room to all of it.
 const BOARD_SIZES: [f64; 11] = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.];
 const FONT_SIZES: [f64; 7] = [10., 11., 12., 13., 14., 15., 16.];
@@ -89,26 +84,12 @@ pub enum Event {
     Failed(String),
 }
 
-/// An engine that can be fetched.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Engine {
-    Stockfish,
-    Maia,
-}
-
-/// What a running download reports.
-enum Update {
-    Progress(f32),
-    Done(Result<Vec<(&'static str, PathBuf)>, String>),
-}
-
 pub struct SettingsView {
     page: SettingsPage,
     open_select: Option<&'static str>,
-    /// What's being fetched, and how far along it is, from 0 to 1.
-    downloading: Option<(Engine, f32)>,
-    /// The agent whose adapter is being installed.
-    installing: Option<AgentKind>,
+    /// Engines and adapters being fetched, which outlive this page.
+    installs: Entity<Installs>,
+    _redraw: Subscription,
 }
 
 impl EventEmitter<Event> for SettingsView {}
@@ -135,24 +116,6 @@ fn stop_of(stops: &[f64], value: f64) -> usize {
     (0..stops.len())
         .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
         .unwrap_or(0)
-}
-
-/// Fetches an engine and says which settings now point at it.
-fn install(
-    engine: Engine,
-    root: &std::path::Path,
-    progress: &mut dyn FnMut(f32),
-) -> Result<Vec<(&'static str, PathBuf)>, String> {
-    match engine {
-        Engine::Stockfish => {
-            let program = download::install_stockfish(root, progress)?;
-            Ok(vec![("stockfish", program)])
-        }
-        Engine::Maia => {
-            let (lc0, weights) = download::install_maia(root, progress)?;
-            Ok(vec![("lc0", lc0), ("maia_weights", weights)])
-        }
-    }
 }
 
 impl SettingsView {
@@ -371,64 +334,6 @@ impl SettingsView {
         ]
     }
 
-    /// Starts fetching an engine, reporting progress as it goes.
-    fn download(&mut self, engine: Engine, cx: &mut Context<Self>) {
-        let Some(root) = Settings::engines_dir() else {
-            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
-            return;
-        };
-        self.downloading = Some((engine, 0.));
-        cx.notify();
-        let (updates, incoming) = mpsc::channel();
-        cx.background_spawn(async move {
-            let progress = updates.clone();
-            let installed = install(engine, &root, &mut |done| {
-                let _ = progress.send(Update::Progress(done));
-            });
-            let _ = updates.send(Update::Done(installed));
-        })
-        .detach();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(PROGRESS_TICK).await;
-                for update in incoming.try_iter() {
-                    let finished = matches!(update, Update::Done(_));
-                    if this
-                        .update(cx, |this, cx| this.on_update(update, cx))
-                        .is_err()
-                        || finished
-                    {
-                        return;
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn on_update(&mut self, update: Update, cx: &mut Context<Self>) {
-        match update {
-            Update::Progress(done) => {
-                if let Some((_, progress)) = &mut self.downloading {
-                    *progress = done;
-                }
-            }
-            Update::Done(Ok(paths)) => {
-                self.downloading = None;
-                for (key, path) in paths {
-                    Self::write(key, path.to_string_lossy().as_ref(), cx);
-                }
-            }
-            Update::Done(Err(error)) => {
-                self.downloading = None;
-                cx.emit(Event::Failed(
-                    tr_with!("error-download", error = error).to_string(),
-                ));
-            }
-        }
-        cx.notify();
-    }
-
     /// Asks for a program or folder, and stores it under `key`.
     fn choose_path(key: &'static str, directories: bool, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -459,14 +364,15 @@ impl SettingsView {
     ) -> AnyElement {
         let settings = Settings::get(cx);
         let missing = kind.missing(&settings);
-        let hint: SharedString = match (&self.downloading, &missing) {
+        let downloading = self.installs.read(cx).downloading();
+        let hint: SharedString = match (&downloading, &missing) {
             (Some((fetching, done)), _) if *fetching == engine => {
                 tr_with!("downloading", percent = (done * 100.).round() as u32)
             }
             (_, Some(missing)) => missing.clone().into(),
             (_, None) => tr("installed"),
         };
-        let busy = self.downloading.is_some();
+        let busy = downloading.is_some();
         let (id, key) = match engine {
             Engine::Stockfish => ("download-stockfish", "stockfish"),
             Engine::Maia => ("download-maia", "lc0"),
@@ -476,14 +382,15 @@ impl SettingsView {
         } else {
             "update"
         });
-        let fetching = self
-            .downloading
-            .is_some_and(|(fetching, _)| fetching == engine);
+        let fetching = downloading.is_some_and(|(fetching, _)| fetching == engine);
         let download = if fetching {
             ui::busy_button(id, label.clone(), &settings).into_any_element()
         } else if can_download && !busy {
             ui::action_button(id, label.clone(), &settings)
-                .on_click(cx.listener(move |this, _, _, cx| this.download(engine, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.installs
+                        .update(cx, |installs, cx| installs.download(engine, cx));
+                }))
                 .into_any_element()
         } else {
             ui::disabled_button(id, label, &settings).into_any_element()
@@ -524,43 +431,17 @@ impl SettingsView {
         rows
     }
 
-    /// Installs an agent's adapter, off the UI thread.
-    fn install_adapter(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
-        let Some(folder) = Settings::adapters_dir() else {
-            cx.emit(Event::Failed(tr("error-no-data-folder").to_string()));
-            return;
-        };
-        self.installing = Some(kind);
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let installed = cx
-                .background_spawn(async move { adapters::install(kind, &folder) })
-                .await;
-            this.update(cx, |this, cx| {
-                this.installing = None;
-                match installed {
-                    Ok(()) => cx.emit(Event::Changed),
-                    Err(error) => cx.emit(Event::Failed(
-                        tr_with!("error-install", error = error).to_string(),
-                    )),
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
     /// Whether each agent can play, and the way there if it can't yet.
     fn agents(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
         let folder = Settings::adapters_dir().unwrap_or_default();
+        let busy = self.installs.read(cx).installing();
         AgentKind::ALL
             .into_iter()
             .enumerate()
             .map(|(index, kind)| {
                 let state = adapters::readiness(kind, &folder);
-                let installing = self.installing == Some(kind);
+                let installing = busy == Some(kind);
                 let hint: SharedString = match state {
                     _ if installing => tr("installing-adapter"),
                     Readiness::Ready => tr("installed"),
@@ -575,18 +456,20 @@ impl SettingsView {
                     if installing {
                         ui::busy_button(("install", index), tr("install"), &settings)
                             .into_any_element()
-                    } else if self.installing.is_some() {
+                    } else if busy.is_some() {
                         ui::disabled_button(("install", index), tr("install"), &settings)
                             .into_any_element()
                     } else {
                         ui::action_button(("install", index), tr("install"), &settings)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.install_adapter(kind, cx)),
-                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.installs.update(cx, |installs, cx| {
+                                    installs.install_adapter(kind, cx);
+                                });
+                            }))
                             .into_any_element()
                     }
                 });
-                ui::setting_row(kind.name(), Some(hint), &settings)
+                ui::logo_setting_row(Logo::of_agent(kind), kind.name(), Some(hint), &settings)
                     .children(button)
                     .into_any_element()
             })
@@ -800,12 +683,15 @@ impl SettingsView {
 }
 
 /// Opens the settings as a view, on `page`.
-pub fn page(page: SettingsPage, cx: &mut App) -> Entity<SettingsView> {
-    cx.new(|_| SettingsView {
-        page,
-        open_select: None,
-        downloading: None,
-        installing: None,
+pub fn page(page: SettingsPage, installs: Entity<Installs>, cx: &mut App) -> Entity<SettingsView> {
+    cx.new(|cx| {
+        let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
+        SettingsView {
+            page,
+            open_select: None,
+            installs,
+            _redraw: redraw,
+        }
     })
 }
 

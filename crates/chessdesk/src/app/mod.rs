@@ -27,6 +27,7 @@ use shakmaty::{Color, Role};
 use crate::board::{self, Handlers, View};
 use crate::export::{self, ExportDialog};
 use crate::i18n::{tr, tr_with};
+use crate::installs::{self, Installs};
 use crate::library::{self, Entry};
 use crate::new_game::{self, NewGame};
 use crate::onboarding::{self, Onboarding};
@@ -156,6 +157,8 @@ pub struct Chessdesk {
     /// While open, the settings' pages take the history's place and their content the board's.
     settings_page: Option<(Entity<SettingsView>, [Subscription; 2])>,
     errors: Vec<SharedString>,
+    /// Engines and adapters being fetched, and what listens to them: redraws and events.
+    installs: (Entity<Installs>, [Subscription; 2]),
 }
 
 impl Chessdesk {
@@ -164,6 +167,12 @@ impl Chessdesk {
         focus.focus(window);
         watch_settings(cx);
         let settings = Settings::get(cx);
+        let installs = cx.new(|_| Installs::default());
+        let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
+        let events = cx.subscribe(&installs, |this, _, event, cx| match event {
+            installs::Event::Changed => this.reload_settings(cx),
+            installs::Event::Failed(error) => this.report(error.clone(), cx),
+        });
         let mut this = Self {
             focus,
             sessions: vec![Session::new(0, Game::default())],
@@ -196,6 +205,7 @@ impl Chessdesk {
             export: None,
             settings_page: None,
             errors: errors.into_iter().map(SharedString::from).collect(),
+            installs: (installs, [redraw, events]),
         };
         if Settings::is_first_run() {
             this.show_onboarding(cx);
@@ -207,7 +217,7 @@ impl Chessdesk {
 
     /// The welcome on first start, then on to a game.
     fn show_onboarding(&mut self, cx: &mut Context<Self>) {
-        let choices = settings_view::page(SettingsPage::Appearance, cx);
+        let choices = settings_view::page(SettingsPage::Appearance, self.installs.0.clone(), cx);
         let changes = cx.subscribe(&choices, |this, _, event, cx| match event {
             settings_view::Event::Changed => this.reload_settings(cx),
             settings_view::Event::Failed(error) => this.report(error.clone(), cx),
@@ -284,7 +294,7 @@ impl Chessdesk {
     }
 
     fn show_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        let view = settings_view::page(page, cx);
+        let view = settings_view::page(page, self.installs.0.clone(), cx);
         // Its parts render here, so its changes have to redraw this view.
         let redraw = cx.observe(&view, |_, _, cx| cx.notify());
         let events = cx.subscribe(&view, |this, _, event, cx| match event {
