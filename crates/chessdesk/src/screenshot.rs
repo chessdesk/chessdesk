@@ -89,6 +89,10 @@ fn command(window: &Window, path: &Path) -> Result<Command, String> {
 
 /// `screencapture` takes the rectangle in points, as GPUI gives it.
 #[cfg(target_os = "macos")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the same signature as on the systems where this can fail"
+)]
 fn command(window: &Window, path: &Path) -> Result<Command, String> {
     let bounds = window.bounds();
     let mut command = Command::new("screencapture");
