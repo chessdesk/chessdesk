@@ -12,6 +12,8 @@ use gpui::{
 use crate::audio;
 use crate::i18n::{self, tr, tr_with};
 use crate::installs::{AppUpdate, Engine, EngineRelease, Installs};
+use crate::model_picker::{self, ModelPicker, Picked};
+use crate::models::Catalog;
 use crate::settings::{SOUND_OFF, Settings, THEME_BOARD};
 use crate::setup::{OpponentKind, title_case};
 use crate::ui::{self, Logo};
@@ -58,7 +60,7 @@ pub enum SettingsPage {
 }
 
 impl SettingsPage {
-    const ALL: [Self; 8] = [
+    pub const ALL: [Self; 8] = [
         Self::Appearance,
         Self::Board,
         Self::Sound,
@@ -68,6 +70,20 @@ impl SettingsPage {
         Self::Plugins,
         Self::Updates,
     ];
+
+    /// How a script names the page: `agents`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Board => "board",
+            Self::Sound => "sound",
+            Self::Engines => "engines",
+            Self::Agents => "agents",
+            Self::Keys => "keys",
+            Self::Plugins => "plugins",
+            Self::Updates => "updates",
+        }
+    }
 
     fn title(self) -> SharedString {
         tr(match self {
@@ -94,6 +110,10 @@ pub struct SettingsView {
     open_select: Option<&'static str>,
     /// Engines and adapters being fetched, which outlive this page.
     installs: Entity<Installs>,
+    /// What each agent offers, for the models it reviews and gives hints with.
+    catalog: Entity<Catalog>,
+    /// Those models' pickers, made as each agent's row first shows, and what keeps their picks.
+    pickers: Vec<(AgentKind, Entity<ModelPicker>, Subscription)>,
     _redraw: Subscription,
 }
 
@@ -495,12 +515,69 @@ impl SettingsView {
         rows
     }
 
-    /// Whether each agent can play, and the way there if it can't yet.
-    fn agents(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// The picker of the model `kind` reviews and gives hints with, made the first time.
+    fn picker(&mut self, kind: AgentKind, cx: &mut Context<Self>) -> Entity<ModelPicker> {
+        if let Some((_, picker, _)) = self.pickers.iter().find(|(known, ..)| *known == kind) {
+            return picker.clone();
+        }
+        let chosen = Settings::get(cx).analysis_model(kind);
+        let catalog = self.catalog.clone();
+        let picker = cx.new(|cx| ModelPicker::new(kind, chosen, catalog, cx));
+        let store = cx.subscribe(&picker, move |_, _, Picked(model): &Picked, cx| {
+            match Settings::store_analysis_model(kind, model.as_deref()) {
+                Ok(()) => cx.emit(Event::Changed),
+                Err(error) => cx.emit(Event::Failed(
+                    tr_with!("error-save-setting", error = error).to_string(),
+                )),
+            }
+        });
+        self.pickers.push((kind, picker.clone(), store));
+        picker
+    }
+
+    /// The model each agent that's set up reviews games and gives hints with.
+    fn analysis_models(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let folder = Settings::adapters_dir().unwrap_or_default();
+        let ready: Vec<_> = AgentKind::ALL
+            .into_iter()
+            .filter(|kind| adapters::readiness(*kind, &folder) == Readiness::Ready)
+            .collect();
+        if ready.is_empty() {
+            return Vec::new();
+        }
+        let settings = Settings::get(cx);
+        let mut rows = vec![
+            div()
+                .flex()
+                .flex_col()
+                .pt_4()
+                .pb_1()
+                .child(
+                    div()
+                        .text_color(settings.colors.text)
+                        .child(tr("analysis-models")),
+                )
+                .child(
+                    div()
+                        .text_color(settings.colors.muted)
+                        .child(tr("analysis-models-hint")),
+                )
+                .into_any_element(),
+        ];
+        for kind in ready {
+            let picker = self.picker(kind, cx);
+            rows.push(model_picker::row(kind, &picker, cx));
+        }
+        rows
+    }
+
+    /// Whether each agent can play, and the way there if it can't yet, then the model each one
+    /// that can reviews and gives hints with.
+    fn agents(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = Settings::get(cx);
         let folder = Settings::adapters_dir().unwrap_or_default();
         let busy = self.installs.read(cx).installing();
-        AgentKind::ALL
+        let mut rows: Vec<_> = AgentKind::ALL
             .into_iter()
             .enumerate()
             .map(|(index, kind)| {
@@ -537,7 +614,9 @@ impl SettingsView {
                     .children(button)
                     .into_any_element()
             })
-            .collect()
+            .collect();
+        rows.extend(self.analysis_models(cx));
+        rows
     }
 
     fn keys(cx: &App) -> Vec<AnyElement> {
@@ -827,13 +906,20 @@ impl SettingsView {
 }
 
 /// Opens the settings as a view, on `page`.
-pub fn page(page: SettingsPage, installs: Entity<Installs>, cx: &mut App) -> Entity<SettingsView> {
+pub fn page(
+    page: SettingsPage,
+    installs: Entity<Installs>,
+    catalog: Entity<Catalog>,
+    cx: &mut App,
+) -> Entity<SettingsView> {
     cx.new(|cx| {
         let redraw = cx.observe(&installs, |_, _, cx| cx.notify());
         let view = SettingsView {
             page,
             open_select: None,
             installs,
+            catalog,
+            pickers: Vec::new(),
             _redraw: redraw,
         };
         view.on_page_shown(cx);

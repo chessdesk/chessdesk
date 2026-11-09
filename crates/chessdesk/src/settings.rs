@@ -1,6 +1,7 @@
 //! User settings: `config.toml` over built-in defaults, themes under that, and the
 //! plugins that bring themes and piece sets.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -12,6 +13,7 @@ use chessdesk_core::plugins::{
     self, BoardTheme, Font as LanguageFont, Language, PieceSet, Plugins, SoundPack, Theme,
     all_pieces, file_name,
 };
+use chessdesk_players::acp::AgentKind;
 use gpui::{App, Font, FontFeatures, FontStyle, FontWeight, Global, Hsla, Image, ImageFormat};
 use gpui::{Pixels, Rgba, SharedString, px};
 use serde::Deserialize;
@@ -22,6 +24,8 @@ use crate::bundled;
 use crate::i18n::{self, tr};
 
 const DEFAULT_CONFIG: &str = include_str!("../assets/default_config.toml");
+/// The table of the model each agent reviews and gives hints with.
+const ANALYSIS_MODELS: &str = "analysis_models";
 const BUILT_IN_THEMES: [(&str, &str); 2] = [
     ("dark", include_str!("../assets/themes/dark.toml")),
     ("light", include_str!("../assets/themes/light.toml")),
@@ -56,6 +60,9 @@ struct Config {
     stockfish: String,
     lc0: String,
     maia_weights: String,
+    /// By agent id; `""` is the agent's own default.
+    #[serde(default)]
+    analysis_models: BTreeMap<String, String>,
     #[serde(default)]
     colors: Table,
 }
@@ -249,6 +256,8 @@ pub struct Settings {
     pub stockfish: String,
     pub lc0: String,
     pub maia_weights: PathBuf,
+    /// The model each agent reviews and gives hints with, by agent id; `""` is its default.
+    analysis_models: BTreeMap<String, String>,
     pub pieces: PieceImages,
     pub board: BoardLook,
     pub board_name: String,
@@ -476,6 +485,7 @@ impl Settings {
             stockfish: config.stockfish,
             lc0: config.lc0,
             maia_weights: PathBuf::from(config.maia_weights),
+            analysis_models: config.analysis_models,
             pieces,
             board,
             board_name: config.board,
@@ -568,12 +578,39 @@ impl Settings {
 
     /// Writes one setting to `config.toml`, keeping the rest of the file as it is.
     pub fn store(key: &str, value: impl Into<toml_edit::Value>) -> Result<(), String> {
+        Self::edit(|document| document[key] = toml_edit::value(value.into()))
+    }
+
+    /// The model `kind` reviews and gives hints with, or `None` for the agent's own default.
+    pub fn analysis_model(&self, kind: AgentKind) -> Option<String> {
+        self.analysis_models
+            .get(kind.id())
+            .filter(|model| !model.is_empty())
+            .cloned()
+    }
+
+    /// Keeps the model `kind` reviews and gives hints with: `None` is the agent's own default,
+    /// written as `""` so that the shipped default doesn't come back in its place.
+    pub fn store_analysis_model(kind: AgentKind, model: Option<&str>) -> Result<(), String> {
+        Self::edit(|document| {
+            let table = document
+                .entry(ANALYSIS_MODELS)
+                .or_insert_with(toml_edit::table)
+                .as_table_like_mut();
+            if let Some(table) = table {
+                table.insert(kind.id(), toml_edit::value(model.unwrap_or_default()));
+            }
+        })
+    }
+
+    /// Changes `config.toml` as `change` says, keeping the rest of the file as it was written.
+    fn edit(change: impl FnOnce(&mut toml_edit::DocumentMut)) -> Result<(), String> {
         let path = Self::config_path().ok_or("no config folder on this system")?;
         let text = fs::read_to_string(&path).unwrap_or_default();
         let mut document: toml_edit::DocumentMut = text
             .parse()
             .map_err(|error: toml_edit::TomlError| error.to_string())?;
-        document[key] = toml_edit::value(value.into());
+        change(&mut document);
         if let Some(folder) = path.parent() {
             fs::create_dir_all(folder).map_err(|error| error.to_string())?;
         }
@@ -605,6 +642,24 @@ mod tests {
     fn the_defaults_are_complete() {
         let table: Table = toml::from_str(DEFAULT_CONFIG).unwrap();
         let _: Config = table.try_into().unwrap();
+    }
+
+    #[test]
+    fn the_analysis_models_name_real_agents_and_a_pick_overrides_them() {
+        let mut table: Table = toml::from_str(DEFAULT_CONFIG).unwrap();
+        let config: Config = table.clone().try_into().unwrap();
+        assert_eq!(config.analysis_models["claude-code"], "sonnet");
+        assert!(
+            config
+                .analysis_models
+                .keys()
+                .all(|id| AgentKind::from_id(id).is_some())
+        );
+        // The agent's own default, picked over the shipped one, is kept as "".
+        let user: Table = toml::from_str("[analysis_models]\nclaude-code = \"\"").unwrap();
+        merge(&mut table, user);
+        let config: Config = table.try_into().unwrap();
+        assert_eq!(config.analysis_models["claude-code"], "");
     }
 
     #[test]

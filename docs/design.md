@@ -86,6 +86,13 @@ OpenRouter. More than five get a list to type in.
 Copilot offers none over ACP. Its default comes from `~/.copilot/settings.json` (`auto` without
 one), and a model typed in New Game goes to it as `--model`.
 
+Reviews and hints run on the model picked for each agent under Settings, Agents, or in the
+welcome's last step, kept in `config.toml` as `[analysis_models]` by agent id. Before that they
+ran on the agent's own default, which is whatever its CLI was last set to: Pi's was a free
+OpenRouter model nobody had chosen for chess. Claude ships with `sonnet`, which explains as well
+as Opus for less; picking the agent's default writes `""`, so that the shipped one doesn't come
+back.
+
 ## Strength labels
 
 Stockfish's `UCI_Elo` is on an engine scale, anchored to CCRL 40/4 and calibrated at 60 s + 0.6 s, so

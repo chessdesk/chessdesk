@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use chessdesk_core::Annotations;
-use gpui::{AppContext, AsyncWindowContext, Context, WeakEntity, Window};
+use gpui::{App, AppContext, AsyncWindowContext, Context, WeakEntity, Window};
 use shakmaty::san::SanPlus;
 
 use chessdesk_players::acp::AgentConfig;
@@ -14,6 +14,7 @@ use super::Chessdesk;
 use super::flow::helper_config;
 use crate::screenshot;
 use crate::script::{Command, Ply, Step};
+use crate::settings::Settings;
 use crate::setup::{Setup, Side};
 
 /// How long a command waits for the game to settle unless the script says otherwise: enough
@@ -44,8 +45,8 @@ impl Chessdesk {
     }
 
     /// Whether nothing is under way in the game on show: no opponent or agent at work, no
-    /// evaluation, no pieces moving.
-    fn is_settled(&self) -> bool {
+    /// evaluation, no pieces moving, no agent being asked for its models.
+    fn is_settled(&self, cx: &App) -> bool {
         let session = self.session();
         let live_busy = session
             .live
@@ -56,6 +57,7 @@ impl Chessdesk {
             && session.reviewer.is_none()
             && !session.suggesting
             && session.slides.is_empty()
+            && self.catalog.0.read(cx).activity().is_none()
     }
 
     fn run_command(&mut self, command: Command, cx: &mut Context<Self>) -> Result<(), String> {
@@ -78,9 +80,10 @@ impl Chessdesk {
             Command::Resign => self.resign(cx),
             Command::Analyze => self.analyze(cx),
             Command::Review { agent, model } => {
+                let config = helper_config(agent, &Settings::get(cx));
                 let config = AgentConfig {
-                    model: model.or(helper_config(agent).model),
-                    ..helper_config(agent)
+                    model: model.or(config.model),
+                    ..config
                 };
                 self.review_using(config, cx);
             }
@@ -91,6 +94,7 @@ impl Chessdesk {
                 };
                 self.step_to(ply, cx);
             }
+            Command::Settings(page) => self.show_settings(page, cx),
             Command::Discard => {
                 let path = self
                     .session()
@@ -148,6 +152,8 @@ async fn run(
             }
             Command::Screenshot(path) => {
                 cx.background_executor().timer(ANIMATIONS).await;
+                // What has drawn meanwhile may have started work, such as asking for models.
+                settle(this, timeout, cx).await.map_err(at)?;
                 let shot = this
                     .update_in(cx, |_, window, _| screenshot::capture(window, &path))
                     .map_err(gone)?
@@ -191,7 +197,9 @@ async fn settle(
 ) -> Result<(), String> {
     let started = Instant::now();
     loop {
-        let settled = this.update(cx, |this, _| this.is_settled()).map_err(gone)?;
+        let settled = this
+            .update(cx, |this, cx| this.is_settled(cx))
+            .map_err(gone)?;
         if settled {
             return Ok(());
         }

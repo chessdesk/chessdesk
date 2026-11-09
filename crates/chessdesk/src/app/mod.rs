@@ -157,7 +157,7 @@ pub struct Chessdesk {
     renaming: Option<history::Renaming>,
     about_open: bool,
     /// The welcome on first start, and what it listens to: its settings and its end.
-    onboarding: Option<(Entity<Onboarding>, [Subscription; 2])>,
+    onboarding: Option<(Entity<Onboarding>, [Subscription; 3])>,
     dialog: Option<(Entity<NewGame>, Subscription)>,
     export: Option<(Entity<ExportDialog>, Subscription)>,
     /// While open, the settings' pages take the history's place and their content the board's.
@@ -256,17 +256,26 @@ impl Chessdesk {
 
     /// The welcome on first start, then on to a game.
     fn show_onboarding(&mut self, cx: &mut Context<Self>) {
-        let choices = settings_view::page(SettingsPage::Appearance, self.installs.0.clone(), cx);
+        let choices = settings_view::page(
+            SettingsPage::Appearance,
+            self.installs.0.clone(),
+            self.catalog.0.clone(),
+            cx,
+        );
         let changes = cx.subscribe(&choices, |this, _, event, cx| match event {
             settings_view::Event::Changed => this.reload_settings(cx),
             settings_view::Event::Failed(error) => this.report(error.clone(), cx),
             settings_view::Event::Close => {}
         });
-        let welcome = onboarding::dialog(choices, self.installs.0.clone(), cx);
+        let welcome =
+            onboarding::dialog(choices, self.installs.0.clone(), self.catalog.0.clone(), cx);
         let done = cx.subscribe(&welcome, |this, _, done: &onboarding::Done, cx| {
             this.finish_onboarding(done.agent, cx);
         });
-        self.onboarding = Some((welcome, [changes, done]));
+        let failed = cx.subscribe(&welcome, |this, _, failed: &onboarding::Failed, cx| {
+            this.report(failed.0.clone(), cx);
+        });
+        self.onboarding = Some((welcome, [changes, done, failed]));
         cx.notify();
     }
 
@@ -360,7 +369,7 @@ impl Chessdesk {
     }
 
     fn show_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        let view = settings_view::page(page, self.installs.0.clone(), cx);
+        let view = settings_view::page(page, self.installs.0.clone(), self.catalog.0.clone(), cx);
         // Its parts render here, so its changes have to redraw this view.
         let redraw = cx.observe(&view, |_, _, cx| cx.notify());
         let events = cx.subscribe(&view, |this, _, event, cx| match event {

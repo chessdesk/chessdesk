@@ -11,6 +11,7 @@ mod fonts;
 mod i18n;
 mod installs;
 mod library;
+mod model_picker;
 mod models;
 mod new_game;
 mod onboarding;
