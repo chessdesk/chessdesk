@@ -5,6 +5,7 @@ pub mod acp;
 pub mod adapters;
 pub mod analysis;
 pub mod download;
+mod illegal;
 mod pi;
 pub mod prompt;
 pub mod reply;

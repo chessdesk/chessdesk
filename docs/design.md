@@ -112,7 +112,15 @@ of the network's name. It's a rough fit to a few reports, not a measurement.
   for a comment and markings on the start: it would otherwise say nothing until it had moved. The
   call also opens the session, so its first move is an ordinary turn. The comment is kept in the
   PGN tag `ChessdeskIntro`, since the comment before the first move holds the player's notes.
-- Legal moves are listed only after an illegal reply, once. Then the game pauses.
+- Legal moves are listed only after an illegal reply, once, with why the move it tried can't be
+  played: "Rxe5: your pawn on e6 blocks your rook on e8." Then the game pauses. In the GLM 5.3
+  Flash game of 2026-11-09 every illegal try came from a misread board, a pawn in the way or a
+  bishop traded long before, and with the list alone it picked the first capture it saw and lost
+  its queen. The reason only puts its reading right: listing what attacks and defends what on
+  every turn would play the tactics for it, and a weak model would play far above itself. Told
+  why, the model wrote about its try in the next comment, which the player never saw, until the
+  retry said plainly to leave it out: in two games of 37 and 16 moves, 15 and 7 tries, all
+  answered with a legal move but one.
 - Forced moves skip the agent, unless it coaches: the move that forced it is often the player's worst.
 - A review is one call, covering each of the player's moves.
 

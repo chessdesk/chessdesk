@@ -593,7 +593,7 @@ fn add_tokens(total: &mut Option<Tokens>, more: Option<Tokens>) {
 }
 
 /// Reads a move from the session's reply to `text`, and if there's none, asks once more with
-/// the legal moves listed.
+/// the legal moves listed and why the move it tried can't be played.
 fn ask_for_move(
     session: &Session,
     text: String,
@@ -607,7 +607,8 @@ fn ask_for_move(
             tokens,
         });
     }
-    let (second, more) = session.ask(prompt::retry(position))?;
+    let attempted = reply::attempted(&first);
+    let (second, more) = session.ask(prompt::retry(position, attempted))?;
     add_tokens(&mut tokens, more);
     match reply::parse(&second, position) {
         Some((played, annotations)) => Ok(Decision {

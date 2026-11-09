@@ -60,6 +60,26 @@ fn parse_move(word: &str, position: &Chess) -> Option<Move> {
     word.parse::<UciMove>().ok()?.to_move(position).ok()
 }
 
+/// The move a reply meant, legal or not: the first word outside its comment and markup that
+/// reads as SAN. For telling the agent why it can't be played.
+pub fn attempted(reply: &str) -> Option<San> {
+    let (text, _) = split_commands(reply);
+    let mut outside = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    for next in text.chars() {
+        match next {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => outside.push(next),
+            _ => {}
+        }
+    }
+    outside
+        .split_whitespace()
+        .find_map(|word| clean(word).parse::<shakmaty::san::SanPlus>().ok())
+        .map(|san| san.san)
+}
+
 /// The first legal move in a reply, and the reply's markings. Whatever isn't the move
 /// counts as the comment, unless it's in the way of nothing but the move.
 pub fn parse(reply: &str, position: &Chess) -> Option<(Move, Annotations)> {
@@ -482,6 +502,14 @@ mod tests {
         assert_eq!(game.moves()[0].annotations.highlights.len(), 1);
         assert_eq!(game.moves()[3].annotations.arrows.len(), 1);
         assert!(game.moves()[2].annotations.is_empty());
+    }
+
+    #[test]
+    fn finds_the_illegal_move_a_reply_meant() {
+        let reply = "{Queen takes, it's defended twice.} Rxe5\n\n[%next Bd6]";
+        assert_eq!(attempted(reply), Some("Rxe5".parse().unwrap()));
+        assert_eq!(attempted("{Nothing but words, GG!}"), None);
+        assert_eq!(attempted("**1... O-O**"), Some("O-O".parse().unwrap()));
     }
 
     #[test]

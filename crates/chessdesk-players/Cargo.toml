@@ -23,5 +23,8 @@ ureq = "3"
 which = "8"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
