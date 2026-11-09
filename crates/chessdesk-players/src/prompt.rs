@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use chessdesk_core::review::Verdict;
+use chessdesk_core::review::{SUMMARY_TAG, Verdict};
 use chessdesk_core::{Game, pgn};
 use shakmaty::san::San;
 use shakmaty::{Chess, Color, Position, Role};
@@ -39,7 +39,8 @@ const REVIEW: &str = "You're a friendly coach going over a game with the player,
                       at the board afterwards: casual, honest, a sentence or two, no textbook \
                       phrases. Example: 14... Nf6 {This is where it slipped. See the fork on \
                       d5? Happens to everyone.} [%cal Gd5f6] [%csl Rf6]. Cover every listed \
-                      move. No other text.";
+                      move. Then end with one line: Summary {two or three sentences on how \
+                      the game went for them and the one thing to work on}. No other text.";
 
 const HINT: &str = "You're a friendly chess coach. The player is stuck and asks for a hint: \
                     the best move for them in the position given. Reply with only that move \
@@ -233,10 +234,12 @@ fn player_moves(game: &Game) -> Vec<usize> {
 }
 
 /// The whole review in one message: the game as PGN, evaluations included if there are any,
-/// and the moves to comment on. The player's notes are their own and stay out of it.
+/// and the moves to comment on. The player's notes are their own and stay out of it, and a
+/// summary from an earlier review would only be written again.
 pub fn review(game: &Game) -> String {
     let mut shared = game.clone();
     shared.notes.clear();
+    shared.tags.retain(|(name, _)| name != SUMMARY_TAG);
     let mut text = pgn::write(&shared);
     text.push_str("\nComment on:");
     for index in player_moves(game) {
@@ -406,5 +409,12 @@ mod tests {
         let mut game = after(&["e4", "e5"]);
         game.notes = "My secret plan".to_owned();
         assert!(!review(&game).contains("secret"));
+    }
+
+    #[test]
+    fn review_leaves_out_the_last_summary() {
+        let mut game = after(&["e4", "e5"]);
+        game.set_tag(SUMMARY_TAG, "Well played");
+        assert!(!review(&game).contains("Well played"));
     }
 }

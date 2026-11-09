@@ -197,6 +197,19 @@ pub fn apply_review(reply: &str, game: &mut Game) -> usize {
     applied
 }
 
+/// The review's closing line, `Summary {how it went}`, as one line of plain text.
+pub fn review_summary(reply: &str) -> Option<String> {
+    let line = reply.lines().rev().map(str::trim).find(|line| {
+        let line = line.trim_start_matches(['-', '*', ' ']);
+        line.get(..7)
+            .is_some_and(|word| word.eq_ignore_ascii_case("summary"))
+    })?;
+    let rest = line.trim_start_matches(['-', '*', ' '])[7..].trim_start_matches([':', '*', ' ']);
+    let text = annotation::parse(&rest.replace(['{', '}'], "")).text;
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!text.is_empty()).then_some(text)
+}
+
 /// Finds which move a line is about, and returns what follows the move.
 fn review_line<'a>(line: &'a str, game: &Game) -> Option<(usize, &'a str)> {
     let line = line.trim().trim_start_matches(['-', '*', ' ']);
@@ -440,6 +453,26 @@ mod tests {
         assert_eq!(game.moves()[0].annotations.highlights.len(), 1);
         assert_eq!(game.moves()[3].annotations.arrows.len(), 1);
         assert!(game.moves()[2].annotations.is_empty());
+    }
+
+    #[test]
+    fn reads_the_summary_off_the_last_line() {
+        let reply = "1. e4 {Solid}
+Summary {Good start. Watch your king.} [%csl Rg8]";
+        assert_eq!(
+            review_summary(reply).as_deref(),
+            Some("Good start. Watch your king.")
+        );
+        assert_eq!(
+            review_summary(
+                "**Summary:** Calm
+  game."
+            )
+            .as_deref(),
+            Some("Calm")
+        );
+        assert_eq!(review_summary("1. e4 {Solid}"), None);
+        assert_eq!(review_summary("Summary {}"), None);
     }
 
     #[test]

@@ -51,7 +51,6 @@ pub struct Onboarding {
     step: Step,
     /// The agents picked, in the list's order.
     agents: Vec<AgentKind>,
-    stockfish: bool,
     /// Adapters still to install: one at a time.
     queue: VecDeque<AgentKind>,
     /// Redraws for the rows of `choices`, which render here, and the next step of the setup
@@ -76,7 +75,8 @@ impl Onboarding {
             .copied()
             .filter(|kind| adapters::readiness(*kind, &folder) == Readiness::NoAdapter)
             .collect();
-        if self.stockfish && stockfish_wanted(&Settings::get(cx)) {
+        // Not a choice: analysis, hints and the likelihood all need it.
+        if stockfish_wanted(&Settings::get(cx)) {
             self.installs.update(cx, |installs, cx| {
                 installs.fetch_for(OpponentKind::Stockfish, cx);
             });
@@ -122,19 +122,21 @@ impl Onboarding {
             .into_any_element()
     }
 
-    /// A row with a switch, which only switches before the setup starts.
+    /// A row with a switch, which only switches before the setup starts, and only if `flip`
+    /// says how.
     fn switch_row(
         &self,
         row: gpui::Div,
         id: impl Into<gpui::ElementId>,
         on: bool,
-        flip: impl Fn(&mut Self) + 'static,
+        flip: Option<impl Fn(&mut Self) + 'static>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = Settings::get(cx);
         let toggle = ui::toggle(id, on, window, cx, &settings);
-        let toggle = if self.step == Step::Opponents {
+        let flip = flip.filter(|_| self.step == Step::Opponents);
+        let toggle = if let Some(flip) = flip {
             toggle
                 .on_click(cx.listener(move |this, _, _, cx| {
                     flip(this);
@@ -174,7 +176,7 @@ impl Onboarding {
                     row,
                     ("agent", index),
                     on,
-                    move |this| {
+                    Some(move |this: &mut Self| {
                         if on {
                             this.agents.retain(|picked| *picked != kind);
                         } else {
@@ -184,7 +186,7 @@ impl Onboarding {
                                 AgentKind::ALL.iter().position(|known| known == picked)
                             });
                         }
-                    },
+                    }),
                     window,
                     cx,
                 )
@@ -210,14 +212,8 @@ impl Onboarding {
         if !stockfish_wanted(&settings) && fetching.is_none() {
             return row.into_any_element();
         }
-        self.switch_row(
-            row,
-            "stockfish",
-            self.stockfish,
-            |this| this.stockfish = !this.stockfish,
-            window,
-            cx,
-        )
+        // On and fixed: it's fetched with the rest.
+        self.switch_row(row, "stockfish", true, None::<fn(&mut Self)>, window, cx)
     }
 
     fn buttons(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -325,7 +321,6 @@ pub fn dialog(
             installs,
             step: Step::Looks,
             agents: Vec::new(),
-            stockfish: true,
             queue: VecDeque::new(),
             _subscriptions: subscriptions,
         }

@@ -1,7 +1,7 @@
 //! Reviewing a finished game: an engine evaluates every position, then an agent, if
 //! asked, comments on the moments that mattered in a single call.
 
-use chessdesk_core::review::{glyph, losses};
+use chessdesk_core::review::{glyph, is_mistake_glyph, losses, record_accuracy};
 use chessdesk_core::{Annotations, Arrow, Eval, Game, Highlight, Mark, Wdl};
 use shakmaty::{Chess, Color, KnownOutcome, Move, Outcome, Position};
 
@@ -36,7 +36,8 @@ fn final_eval(position: &Chess) -> Option<Eval> {
 }
 
 /// Fills in every move's evaluation, calling `progress` with moves done. It then grades
-/// the moves and marks what the engine would have played instead of each mistake.
+/// the moves, marks what the engine would have played instead of each mistake, and records
+/// each side's accuracy.
 pub fn evaluate_game(
     engine: &mut Engine,
     game: &mut Game,
@@ -62,17 +63,20 @@ pub fn evaluate_game(
     for (played, best) in game.moves_mut().iter_mut().zip(&best_before) {
         played.better = best.filter(|best| *best != played.played);
     }
+    record_accuracy(game);
     Ok(())
 }
 
-/// Grades each move, and on a mistake marks the move and the better one.
+/// Grades each move, and on a mistake marks the move and the better one. The grade replaces
+/// any a quicker look gave during the game, such as tutoring's.
 fn mark_mistakes(game: &mut Game, best_before: &[Option<Move>]) {
     for (index, loss) in losses(game) {
-        let Some(nag) = glyph(loss) else { continue };
         let played = &mut game.moves_mut()[index];
-        if !played.nags.contains(&nag) {
-            played.nags.push(nag);
-        }
+        played.nags.retain(|nag| !is_mistake_glyph(*nag));
+        let Some(nag) = glyph(loss) else { continue };
+        // A mistake isn't also perfect.
+        played.nags.retain(|nag| *nag != 1);
+        played.nags.push(nag);
         played
             .annotations
             .merge(mistake_marks(played.played, best_before[index]));
@@ -134,5 +138,8 @@ mod tests {
         assert_eq!(marked.nags, [4]);
         assert_eq!(marked.annotations.highlights[0].square, Square::A3);
         assert_eq!(marked.annotations.arrows[0].to, Square::E4);
+        // Gone over again, it keeps one grade, not two.
+        mark_mistakes(&mut game, &[Some(better)]);
+        assert_eq!(game.moves()[0].nags, [4]);
     }
 }

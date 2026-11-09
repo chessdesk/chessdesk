@@ -37,9 +37,10 @@ which costs no tokens, or in a game against an agent from any agent, which says 
 **Pick the kind of game.** A casual game has hints, take-backs and tutoring. A competition is
 on the clock, from bullet (1+0) to classical (90+30), with no help at all.
 
-**Go back over your games.** Every game is saved as you play. Open one from the sidebar and press
-Analyze: an agent goes through your moves one by one and explains them, or Stockfish checks each
-move and marks your mistakes. The bar and graph show how the game swung. Notes you write next to a
+**Go back over your games.** Every game is saved as you play. When one ends, Stockfish goes over
+it by itself: it marks your mistakes, with Chessdesk's mark beside those moves in the list, and
+works out how accurately each side played. Press Analyze and an agent goes through your moves one
+by one, explains them and sums the game up. The bar and graph show how the game swung. Notes you write next to a
 game are saved in its PGN file, and agents never see them.
 
 **Keep several games going.** Start another game and the first one keeps running, clocks included.
@@ -83,7 +84,7 @@ Everything is under Settings (`Ctrl+,`), and the new game dialog tells you if so
 | Copilot | The [Copilot CLI](https://github.com/github/copilot-cli) and your login |
 | OpenCode | [OpenCode](https://opencode.ai), set up with a provider |
 | Pi | [Pi](https://github.com/earendil-works/pi), set up with a provider, Node.js, and the adapter |
-| Stockfish | Nothing: one click in New Game, or under Settings, Engines |
+| Stockfish | Nothing: the first start downloads it, or one click under Settings, Engines |
 | Maia | Nothing on Windows: download it under Settings, Engines. Elsewhere, install [lc0](https://lczero.org) yourself |
 
 ## What agents cost

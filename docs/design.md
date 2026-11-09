@@ -6,7 +6,7 @@
 |---|---|---|
 | Engines | UCI | The standard. Stockfish and `lc0` both speak it. |
 | Agents | ACP | One client for every agent, and the agent's own login. |
-| Games | PGN and FEN, with `[%csl]`, `[%cal]`, `[%eval]`, `[%clk]`, and Chessdesk's own `[%wdl]` and `[%better]` | Saved games and their analysis open in other tools, which skip what they don't know. |
+| Games | PGN and FEN, with `[%csl]`, `[%cal]`, `[%eval]`, `[%clk]`, and Chessdesk's own `[%wdl]`, `[%better]` and `Chessdesk…` tags | Saved games and their analysis open in other tools, which skip what they don't know. |
 | Plugins | Folders with a TOML manifest and plain files | Installing is copying a folder. |
 | Translations | Project Fluent | Plurals for any language, and any message can be left out. |
 
@@ -145,6 +145,22 @@ goes to one end. The numbers are kept as they come, turned to White's side. A bo
 The start's own numbers are kept in the `ChessdeskStartWdl` tag, as no move carries them, for grading
 the first move. Before any move a normal game shows the middle all the same; a set-up position shows
 its own numbers, or an empty bar without them.
+
+## Analysis
+
+A game that ends gets Stockfish's analysis at once, 300 ms a position, if Stockfish is there; the
+first start always downloads it. It grades every move, marks the mistakes and records each side's
+accuracy in `ChessdeskWhiteAccuracy` and `ChessdeskBlackAccuracy`. Those tags mark the game as
+analysed, so Stockfish isn't offered for it again. A grade replaces tutoring's: that one came from a
+150 ms look.
+
+Accuracy follows Lichess's curve over the expected score a move gave away, with win percentage as
+the expected score: `103.1668 · e^(−0.04354 · lost%) − 3.1669`, clamped to 0 to 100, and a side's
+accuracy is the plain mean over its moves. Lichess weights by volatility and mixes in a harmonic
+mean, so the numbers are close to its but not the same.
+
+An agent's review ends with a `Summary {…}` line, kept on one line in `ChessdeskSummary` and left
+out of the next review's PGN.
 
 ## Not built yet
 
