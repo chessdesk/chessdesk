@@ -105,7 +105,7 @@ fn command(window: &Window, path: &Path) -> Result<Command, String> {
     Ok(command)
 }
 
-/// ImageMagick's `import`, on X11 only: Wayland lets no program read the screen this way.
+/// `import` from `ImageMagick`, on X11 only: Wayland lets no program read the screen this way.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn command(window: &Window, path: &Path) -> Result<Command, String> {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
