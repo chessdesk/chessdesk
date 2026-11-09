@@ -318,9 +318,11 @@ fn render_bubble(text: String, settings: &Settings) -> Div {
         )
 }
 
-/// How the game ended, in the colour of how it went for the player.
+/// How the game ended, in the colour of how it went for the player, with what going over it
+/// found: each side's accuracy, the player's first, and an agent's summary of its review.
 fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
-    let standing = standing(&session.game)?;
+    let game = &session.game;
+    let standing = standing(game)?;
     let colors = &settings.colors;
     let (text, color) = match &standing {
         Standing::Won => (tr("result-won"), colors.mark(Mark::Green)),
@@ -328,109 +330,58 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
         Standing::Draw => (tr("draw"), colors.muted),
         Standing::Others(result) => (result.clone().into(), colors.muted),
     };
-    let ending = session
-        .game
+    let ending = game
         .ending()
         .map(|ending| format!(" {}", ending_text(ending)));
-    Some(
-        div()
-            .flex_none()
-            .px_2()
-            .py_1()
-            .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
-            .bg(color.opacity(ui::CARD_TINT))
-            .border_1()
-            .border_color(ui::card_edge(settings))
-            .text_color(color)
-            .child(format!("{text}{}", ending.unwrap_or_default())),
-    )
-}
-
-/// What going over the game found, in the colour that marks the moves Stockfish found fault
-/// with: each side's accuracy, the player's first, and an agent's summary of its review.
-fn render_analysis(session: &Session, settings: &Settings) -> Option<Div> {
-    let game = &session.game;
-    let color = settings.colors.callout;
+    let detail = color.opacity(ui::CARD_DETAIL);
     let player = library::player(game);
     let sides = match player {
         Some(player) => [player, player.other()],
         None => [Color::White, Color::Black],
     };
-    let rows: Vec<_> = sides
-        .into_iter()
-        .filter_map(|side| {
-            let accuracy = review::recorded_accuracy(game, side)?;
-            let name: SharedString = if Some(side) == player {
-                tr("you")
-            } else {
-                let tag = if side.is_white() { "White" } else { "Black" };
-                game.tag(tag)
-                    .map_or_else(|| side_name(side), |name| name.to_owned().into())
-            };
-            Some(
-                div()
-                    .flex()
-                    .justify_between()
-                    .gap_2()
-                    .text_color(settings.colors.text)
-                    .child(div().min_w_0().truncate().child(name))
-                    .child(div().flex_none().child(tr_with!(
-                        "accuracy-percent",
-                        percent = accuracy.round() as u32
-                    ))),
-            )
-        })
-        .collect();
-    let summary = game.tag(SUMMARY_TAG).filter(|text| !text.is_empty());
-    if rows.is_empty() && summary.is_none() {
-        return None;
-    }
-    let accuracy = (!rows.is_empty()).then(|| {
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .text_color(color)
-                    .child(ui::icon(
-                        Icon::Logo,
-                        settings.ui_font_size * MARK_SCALE,
-                        color,
-                    ))
-                    .child(tr("accuracy")),
-            )
-            .children(rows)
+    let accuracy = sides.into_iter().filter_map(|side| {
+        let accuracy = review::recorded_accuracy(game, side)?;
+        let name: SharedString = if Some(side) == player {
+            tr("you")
+        } else {
+            let tag = if side.is_white() { "White" } else { "Black" };
+            game.tag(tag)
+                .map_or_else(|| side_name(side), |name| name.to_owned().into())
+        };
+        Some(
+            div()
+                .flex()
+                .justify_between()
+                .gap_2()
+                .text_color(detail)
+                .child(div().min_w_0().truncate().child(name))
+                .child(div().flex_none().child(tr_with!(
+                    "accuracy-percent",
+                    percent = accuracy.round() as u32
+                ))),
+        )
     });
-    let summary = summary.map(|text| {
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .text_color(color.opacity(ui::CARD_DETAIL))
-                    .child(tr("summary")),
-            )
-            .child(
-                div()
-                    .text_color(settings.colors.text)
-                    .child(text.to_owned()),
-            )
-    });
+    let summary = game
+        .tag(SUMMARY_TAG)
+        .filter(|text| !text.is_empty())
+        .map(|text| div().pt_1().text_color(colors.text).child(text.to_owned()));
     Some(
         div()
             .flex()
             .flex_col()
             .flex_none()
-            .gap_1()
+            .gap_0p5()
             .px_2()
             .py_1()
             .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
             .bg(color.opacity(ui::CARD_TINT))
             .border_1()
             .border_color(ui::card_edge(settings))
+            .child(
+                div()
+                    .text_color(color)
+                    .child(format!("{text}{}", ending.unwrap_or_default())),
+            )
             .children(accuracy)
             .children(summary),
     )
@@ -937,7 +888,6 @@ impl Chessdesk {
             .overflow_y_scroll()
             .children(clocks)
             .children(render_result(session, settings))
-            .children(render_analysis(session, settings))
             .children(
                 session
                     .latest_feedback()
