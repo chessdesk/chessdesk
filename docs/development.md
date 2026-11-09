@@ -70,6 +70,50 @@ board_dark = "#2f3b3b"
 
 The solid piece icons are [Font Awesome Free](https://fontawesome.com) (CC BY 4.0). The Claude Code, Codex, Copilot and OpenCode logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) and remain their owners' marks. The Pi logo comes from [pi.dev](https://pi.dev) and remains its owners' mark. The Stockfish logo in `assets` comes from [stockfish-web](https://github.com/official-stockfish/stockfish-web) (MIT). The Maia logo is the favicon of [maiachess.com](https://www.maiachess.com) and remains its owners' mark.
 
+## Scripts
+
+`chessdesk script <file>` drives the app the way a player would and takes screenshots, for
+checking a change by eye without clicking through it. It uses your own config, engines and agents;
+the games it plays land in the history unless the script ends with `discard`.
+
+```powershell
+just script crates/chessdesk/scripts/mate.txt       # same every run, no tokens
+just script crates/chessdesk/scripts/analysis.txt   # a lost game, its analysis and a Pi review
+```
+
+Screenshots go next to the script (`crates/chessdesk/scripts/shots/`, ignored by git). The log
+goes to stderr, one line per command, and the process exits 0 when the script went through, 1 when
+a command failed or the app reported an error, and 2 when the script couldn't be read. Use a
+debug build: a release build on Windows has no console to print to.
+
+One command per line; `#` starts a comment, and paths are relative to the script. Each command
+first waits until the game on show has settled: no opponent or agent at work, no evaluation or
+analysis running, no pieces moving.
+
+| Command | Does |
+|---|---|
+| `new white\|black [elo N] [fen FEN]` | A casual game against Stockfish, at 1320 unless `elo` says otherwise, from the start or the FEN (the rest of the line). New Game's remembered choices stay as they were. |
+| `open PATH` | Opens a saved game. |
+| `play SAN...` | Plays the player's moves, each once the opponent has answered the one before. |
+| `resign` | Resigns the game on show. |
+| `analyze` | Runs Stockfish over the game, as the Analyze button does. |
+| `review AGENT [model MODEL]` | An agent's review: `claude-code`, `codex`, `copilot`, `opencode` or `pi`, on a model as the agent names it (New Game's model list shows them), e.g. `review pi model openrouter/z-ai/glm-5.3-flash`. Spends tokens. |
+| `show N\|end` | Shows the position after N half-moves, or the last. |
+| `screenshot PATH` | Saves the window as a PNG, after waiting for animations to finish. |
+| `timeout SECONDS` | How long later commands may wait for the game to settle (default 60). Raise it for agents. |
+| `discard` | Moves the game on show to the Recycle Bin. |
+
+Screenshots: on Windows, the window paints itself into the picture (`PrintWindow`), so it can be
+covered or on another desktop. macOS uses `screencapture` on the window's part of the screen, and
+Linux ImageMagick's `import` under X11 only. Neither has been tried yet, and both need the window
+uncovered.
+
+To add a command: a variant in `script.rs` and its parsing, then what it does in
+`app/scripted.rs`. If it starts work that takes a while, make `Chessdesk::is_settled` wait for it,
+or the next command runs too early.
+
+## Examples
+
 Try the app without an engine, or check a real agent, which spends real tokens:
 
 ```powershell

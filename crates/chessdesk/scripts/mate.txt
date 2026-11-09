@@ -1,0 +1,6 @@
+# Mate in one, the same every run: no opponent move, no tokens. The game ends on the board and
+# Stockfish analyses it at once.
+new white fen 6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1
+play Ra8#
+screenshot shots/mate.png
+discard

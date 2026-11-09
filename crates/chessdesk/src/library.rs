@@ -55,17 +55,21 @@ impl Standing {
     }
 }
 
-/// How a game stands for the player, who is `You` in the tags.
+/// The player's side, who is `You` in the tags, if they played this game.
+pub fn player(game: &Game) -> Option<Color> {
+    match (game.tag("White"), game.tag("Black")) {
+        (Some("You"), _) => Some(Color::White),
+        (_, Some("You")) => Some(Color::Black),
+        _ => None,
+    }
+}
+
+/// How a game stands for the player.
 pub fn standing(game: &Game) -> Option<Standing> {
     let Outcome::Known(outcome) = game.outcome() else {
         return None;
     };
-    let player = match (game.tag("White"), game.tag("Black")) {
-        (Some("You"), _) => Some(Color::White),
-        (_, Some("You")) => Some(Color::Black),
-        _ => None,
-    };
-    Some(match (outcome, player) {
+    Some(match (outcome, player(game)) {
         (_, None) => Standing::Others(outcome.as_str().to_owned()),
         (KnownOutcome::Draw, _) => Standing::Draw,
         (KnownOutcome::Decisive { winner }, Some(player)) if winner == player => Standing::Won,

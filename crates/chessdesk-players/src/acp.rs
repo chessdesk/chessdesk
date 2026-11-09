@@ -683,16 +683,28 @@ pub fn hint(config: &AgentConfig, position: &shakmaty::Chess) -> Result<Decision
     ask_for_move(&session, prompt::hint(position), position)
 }
 
-/// Has an agent comment on a game in one call, and returns the comments added and the
-/// tokens spent. Run the engine over the game first: the review reads its evaluations.
-pub fn review_game(
-    config: &AgentConfig,
-    game: &mut Game,
-) -> Result<(usize, Option<Tokens>), PlayerError> {
+/// What a review added to the game, and what it cost.
+#[derive(Debug)]
+pub struct Review {
+    /// How many moves got a comment.
+    pub comments: usize,
+    /// The agent's word on the whole game.
+    pub summary: Option<String>,
+    pub tokens: Option<Tokens>,
+}
+
+/// Has an agent comment on a game and sum it up, in one call. The comments go into the game;
+/// the summary is the caller's to keep. Run the engine over the game first: the review reads
+/// its evaluations.
+pub fn review_game(config: &AgentConfig, game: &mut Game) -> Result<Review, PlayerError> {
     let system = prompt::review_system(config.reply_language.as_deref());
     let session = Session::start(config, system);
     let (text, tokens) = session.ask(prompt::review(game))?;
-    Ok((reply::apply_review(&text, game), tokens))
+    Ok(Review {
+        comments: reply::apply_review(&text, game),
+        summary: reply::review_summary(&text),
+        tokens,
+    })
 }
 
 #[cfg(test)]

@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "chessdesk-core",
  "chessdesk-players",
@@ -975,6 +975,7 @@ dependencies = [
  "notify",
  "nucleo-matcher",
  "proptest",
+ "raw-window-handle",
  "rodio",
  "serde",
  "shakmaty",
@@ -990,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-core"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "pgn-reader",
  "proptest",
@@ -1001,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "chessdesk-players"
-version = "2.6.1"
+version = "2.7.0"
 dependencies = [
  "agent-client-protocol",
  "chessdesk-core",

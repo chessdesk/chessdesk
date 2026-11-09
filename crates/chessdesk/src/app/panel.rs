@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use chessdesk_core::review::Verdict;
+use chessdesk_core::review::{self, SUMMARY_TAG, Verdict};
 use chessdesk_core::{Ending, Mark, PlayedMove};
 use chessdesk_players::acp::{AgentKind, Effort};
 use chessdesk_players::adapters::{self, Readiness};
@@ -43,7 +43,7 @@ enum Helper {
 }
 use crate::i18n::{tr, tr_with};
 use crate::installs::{self, NeedsStockfish};
-use crate::library::{Standing, standing};
+use crate::library::{self, Standing, standing};
 use crate::settings::{Settings, side_name};
 use crate::setup::{OpponentKind, effort_label};
 use crate::ui::{self, Icon, Logo, Transition};
@@ -71,6 +71,8 @@ const FOLD: Duration = Duration::from_millis(200);
 pub(super) const LOG_SHARE: f32 = 2. / 3.;
 /// What every share of the panel's room is multiplied by: see [`grow`].
 const GROW_SCALE: f32 = 1000.;
+/// How large Chessdesk's mark is against the text, beside a move Stockfish found fault with.
+const MARK_SCALE: f32 = 0.75;
 const BUBBLE_TAIL_INSET: Pixels = px(10.);
 const BUBBLE_TAIL_WIDTH: Pixels = px(9.);
 const BUBBLE_TAIL_HEIGHT: Pixels = px(7.);
@@ -181,6 +183,11 @@ impl Folds {
 
     fn get(&self, section: Section) -> &Transition {
         &self.open[section as usize]
+    }
+
+    /// Opens a section, unless it is already.
+    pub(super) fn open(&mut self, section: Section, now: Instant) {
+        self.open[section as usize].set(true, now);
     }
 
     fn toggle(&mut self, section: Section, now: Instant) {
@@ -311,9 +318,11 @@ fn render_bubble(text: String, settings: &Settings) -> Div {
         )
 }
 
-/// How the game ended, in the colour of how it went for the player.
+/// How the game ended, in the colour of how it went for the player, with what going over it
+/// found: each side's accuracy, the player's first, and at the end, an agent's summary.
 fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
-    let standing = standing(&session.game)?;
+    let game = &session.game;
+    let standing = standing(game)?;
     let colors = &settings.colors;
     let (text, color) = match &standing {
         Standing::Won => (tr("result-won"), colors.mark(Mark::Green)),
@@ -321,21 +330,61 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
         Standing::Draw => (tr("draw"), colors.muted),
         Standing::Others(result) => (result.clone().into(), colors.muted),
     };
-    let ending = session
-        .game
+    let ending = game
         .ending()
         .map(|ending| format!(" {}", ending_text(ending)));
+    let detail = color.opacity(ui::CARD_DETAIL);
+    let player = library::player(game);
+    let sides = match player {
+        Some(player) => [player, player.other()],
+        None => [Color::White, Color::Black],
+    };
+    let accuracy = sides.into_iter().filter_map(|side| {
+        let accuracy = review::recorded_accuracy(game, side)?;
+        let name: SharedString = if Some(side) == player {
+            tr("you")
+        } else {
+            let tag = if side.is_white() { "White" } else { "Black" };
+            game.tag(tag)
+                .map_or_else(|| side_name(side), |name| name.to_owned().into())
+        };
+        Some(
+            div()
+                .flex()
+                .justify_between()
+                .gap_2()
+                .text_color(detail)
+                .child(div().min_w_0().truncate().child(name))
+                .child(div().flex_none().child(tr_with!(
+                    "accuracy-percent",
+                    percent = accuracy.round() as u32
+                ))),
+        )
+    });
+    // The word on the whole game, where it ended. Before that, the moves' own comments speak.
+    let summary = game
+        .tag(SUMMARY_TAG)
+        .filter(|text| !text.is_empty() && session.at_latest())
+        .map(|text| div().pt_1().text_color(colors.text).child(text.to_owned()));
     Some(
         div()
+            .flex()
+            .flex_col()
             .flex_none()
+            .gap_0p5()
             .px_2()
             .py_1()
             .rounded(settings.corner_radius * ui::FLAT_RADIUS_SCALE)
             .bg(color.opacity(ui::CARD_TINT))
             .border_1()
             .border_color(ui::card_edge(settings))
-            .text_color(color)
-            .child(format!("{text}{}", ending.unwrap_or_default())),
+            .child(
+                div()
+                    .text_color(color)
+                    .child(format!("{text}{}", ending.unwrap_or_default())),
+            )
+            .children(accuracy)
+            .children(summary),
     )
 }
 
@@ -955,11 +1004,26 @@ impl Chessdesk {
         let played = session.game.moves().get(index)?;
         let text = format!("{}{}", played.san, glyphs(played));
         let ply = index + 1;
+        // Stockfish's marks, the better move and the square, show on the board at this move.
+        let marked = review::is_analysed(&session.game) && review::is_marked(played);
+        let callout = settings.colors.callout;
         Some(
             ui::button(("move", index), session.ply == ply, &settings)
                 .w_full()
+                .flex()
+                .items_center()
+                .gap_1()
                 .text_color(settings.colors.text)
                 .child(text)
+                .when(marked, |button| {
+                    button
+                        .child(ui::icon(
+                            Icon::Logo,
+                            settings.ui_font_size * MARK_SCALE,
+                            callout,
+                        ))
+                        .tooltip(ui::tooltip(tr("move-marked")))
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.step_to(ply, cx)))
                 .into_any_element(),
         )
@@ -1067,9 +1131,12 @@ impl Chessdesk {
                 .w_full()
                 .into_any_element();
         }
+        // Stockfish goes over a game once, by itself when it ends: then only the agents are left.
+        let stockfish = !review::is_analysed(&session.game);
         self.render_helper_menu(
             HelperMenu::Analyze,
             tr("analyze"),
+            stockfish,
             |this, helper, cx| match helper {
                 Helper::Stockfish => this.analyze(cx),
                 Helper::Agent(kind) => this.review_with(kind, cx),
@@ -1079,12 +1146,13 @@ impl Chessdesk {
         )
     }
 
-    /// A full-width button whose choices, Stockfish and every agent, open upwards from the
-    /// bottom of the panel. `pick` does the work with the one picked.
+    /// A full-width button whose choices, Stockfish if `stockfish` and every agent, open upwards
+    /// from the bottom of the panel. `pick` does the work with the one picked.
     fn render_helper_menu(
         &self,
         menu: HelperMenu,
         label: SharedString,
+        stockfish: bool,
         pick: fn(&mut Self, Helper, &mut Context<Self>),
         window: &Window,
         cx: &mut Context<Self>,
@@ -1108,16 +1176,18 @@ impl Chessdesk {
                     pick(this, helper, cx);
                 })
             };
-            let stockfish = ui::list_row((id, 0usize), false, &settings)
-                .gap_1p5()
-                .text_color(settings.colors.text)
-                .child(ui::logo(
-                    Logo::Stockfish,
-                    settings.ui_font_size * ui::LOGO_SCALE,
-                    settings.colors.text,
-                ))
-                .child("Stockfish")
-                .on_click(choose(Helper::Stockfish));
+            let stockfish = stockfish.then(|| {
+                ui::list_row((id, 0usize), false, &settings)
+                    .gap_1p5()
+                    .text_color(settings.colors.text)
+                    .child(ui::logo(
+                        Logo::Stockfish,
+                        settings.ui_font_size * ui::LOGO_SCALE,
+                        settings.colors.text,
+                    ))
+                    .child("Stockfish")
+                    .on_click(choose(Helper::Stockfish))
+            });
             let folder = Settings::adapters_dir().unwrap_or_default();
             // Every agent, greyed out until it's set up, so that they can all be found.
             let agents = AgentKind::ALL.into_iter().enumerate().map(|(index, kind)| {
@@ -1155,7 +1225,7 @@ impl Chessdesk {
                                 this.helper_menu = None;
                                 cx.notify();
                             }))
-                            .child(stockfish)
+                            .children(stockfish)
                             .children(agents),
                     )),
                 ),
@@ -1221,6 +1291,7 @@ impl Chessdesk {
                 self.render_helper_menu(
                     HelperMenu::Hint,
                     tr("hint"),
+                    true,
                     |this, helper, cx| match helper {
                         Helper::Stockfish => this.suggest(cx),
                         Helper::Agent(kind) => this.suggest_with(kind, cx),

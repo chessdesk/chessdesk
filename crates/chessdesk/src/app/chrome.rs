@@ -3,6 +3,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use chessdesk_core::review;
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::adapters::{self, Readiness};
 use gpui::{
@@ -117,7 +118,11 @@ fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Opti
             ]
         }
         1 => {
-            let mut entries = vec![Some(action("analyze-with-stockfish", None, &Analyze)), None];
+            // Stockfish goes over a game once, by itself when it ends.
+            let mut entries = Vec::new();
+            if !review::is_analysed(&session.game) {
+                entries.extend([Some(action("analyze-with-stockfish", None, &Analyze)), None]);
+            }
             let folder = Settings::adapters_dir().unwrap_or_default();
             entries.extend(AgentKind::ALL.map(|kind| {
                 let title = tr_with!("review-with", agent = kind.name());

@@ -5,10 +5,10 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use chessdesk_core::review::{Verdict, loss};
+use chessdesk_core::review::{SUMMARY_TAG, Verdict, is_analysed, loss};
 use chessdesk_core::sound::Sound;
 use chessdesk_core::{Annotations, Arrow, Eval, Game, Mark};
-use chessdesk_players::acp::{AgentConfig, AgentKind, Effort, hint, review_game};
+use chessdesk_players::acp::{AgentConfig, AgentKind, Effort, Review, hint, review_game};
 use chessdesk_players::adapters::{self, Readiness};
 use chessdesk_players::analysis::evaluate_game;
 use chessdesk_players::uci::{Engine, EngineConfig, Limit};
@@ -19,6 +19,7 @@ use shakmaty::{Color, KnownOutcome, Move, Outcome, Position, Role, Square};
 
 use super::Chessdesk;
 use super::clock::Clock;
+use super::panel::Section;
 use super::session::{HintNote, INTRO_TAG, Live, Pause, Promotion, Session, SessionId, Suggestion};
 use crate::audio;
 use crate::board::{SLIDE_TIME, Slide, slide_paths, slide_pieces};
@@ -110,7 +111,7 @@ fn resumed_clock(game: &Game, setup: &Setup) -> Option<Clock> {
 
 /// An agent asked for help rather than to play: reviews and hints. Claude gets Sonnet, which
 /// explains as well for less; the others their own default.
-fn helper_config(kind: AgentKind) -> AgentConfig {
+pub(super) fn helper_config(kind: AgentKind) -> AgentConfig {
     AgentConfig {
         kind,
         model: (kind == AgentKind::ClaudeCode).then(|| "sonnet".to_owned()),
@@ -132,6 +133,11 @@ impl Chessdesk {
         if let Err(error) = setup.save() {
             self.report(tr_with!("error-remember-choices", error = error), cx);
         }
+        self.begin_game(setup, cx);
+    }
+
+    /// Starts a game without keeping its setup as New Game's next choices: scripts use this.
+    pub(super) fn begin_game(&mut self, setup: Setup, cx: &mut Context<Self>) {
         let Some(position) = setup.start_position() else {
             self.report(tr("invalid-position"), cx);
             return;
@@ -269,7 +275,8 @@ impl Chessdesk {
         self.after_change(id, cx);
     }
 
-    /// Saves the game and hands the turn on: to the opponent, or to nobody at the end.
+    /// Saves the game and hands the turn on: to the opponent, or to nobody at the end. A game
+    /// that has just ended opens its moves and has Stockfish go over it.
     pub(super) fn after_change(&mut self, id: SessionId, cx: &mut Context<Self>) {
         self.autosave(id, cx);
         let on_show = id == self.active;
@@ -278,14 +285,27 @@ impl Chessdesk {
         };
         session.selected = None;
         if session.game.outcome().is_known() {
+            let just_ended = session.live.is_some();
             if on_show
-                && session.live.is_some()
+                && just_ended
                 && let Some(sound) = ending_sound(&session.game)
             {
                 audio::play(sound, cx);
             }
             session.stop_clock();
             session.live = None;
+            if just_ended {
+                if on_show {
+                    self.folds.open(Section::Moves, Instant::now());
+                }
+                // Without Stockfish there's nothing to run: the Analyze button leads to it.
+                if OpponentKind::Stockfish
+                    .missing(&Settings::get(cx))
+                    .is_none()
+                {
+                    self.run_analysis(id, cx);
+                }
+            }
         } else {
             self.evaluate_live(id, cx);
             self.ask_opponent(id, cx);
@@ -564,7 +584,7 @@ impl Chessdesk {
         cx.notify();
     }
 
-    fn play(
+    pub(super) fn play(
         &mut self,
         id: SessionId,
         played: Move,
@@ -1192,6 +1212,9 @@ impl Chessdesk {
             .find(|session| session.path.as_deref() == Some(path))
         {
             self.active = session.id;
+            if session.game.outcome().is_known() {
+                self.folds.open(Section::Moves, Instant::now());
+            }
             cx.notify();
             return;
         }
@@ -1199,6 +1222,10 @@ impl Chessdesk {
             Ok(game) => game,
             Err(error) => return self.report(error, cx),
         };
+        // A finished game is there to be gone through.
+        if game.outcome().is_known() {
+            self.folds.open(Section::Moves, Instant::now());
+        }
         let id = self.next_id();
         let mut session = Session::new(id, game);
         session.ply = session.game.moves().len();
@@ -1280,14 +1307,27 @@ impl Chessdesk {
 
     // Review.
 
-    /// Runs Stockfish over the game on show, reporting progress as it goes.
+    /// Runs Stockfish over the game on show, once.
     pub(super) fn analyze(&mut self, cx: &mut Context<Self>) {
-        let id = self.active;
+        if OpponentKind::Stockfish
+            .missing(&Settings::get(cx))
+            .is_some()
+        {
+            return self.report(tr("needs-stockfish"), cx);
+        }
+        self.run_analysis(self.active, cx);
+    }
+
+    /// Runs Stockfish over a finished game that it hasn't been over yet, reporting progress as
+    /// it goes. Not while an agent reviews it: one would overwrite the other's work.
+    fn run_analysis(&mut self, id: SessionId, cx: &mut Context<Self>) {
         let settings = Settings::get(cx);
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        if session.live.is_some() || session.analysis.is_some() || session.game.moves().is_empty() {
+        let busy =
+            session.live.is_some() || session.analysis.is_some() || session.reviewer.is_some();
+        if busy || session.game.moves().is_empty() || is_analysed(&session.game) {
             return;
         }
         let config = EngineConfig::stockfish(&settings.stockfish, None);
@@ -1350,11 +1390,17 @@ impl Chessdesk {
 
     /// Has an agent comment on the game on show, in one call.
     pub(super) fn review_with(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
+        self.review_using(helper_config(kind), cx);
+    }
+
+    /// Has an agent set up as `config` review the game on show.
+    pub(super) fn review_using(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
+        let kind = config.kind;
         let id = self.active;
         let Some(session) = self.session_mut(id) else {
             return;
         };
-        if session.live.is_some() || session.reviewer.is_some() {
+        if session.live.is_some() || session.reviewer.is_some() || session.analysis.is_some() {
             return;
         }
         if session.game.moves().is_empty() {
@@ -1370,11 +1416,10 @@ impl Chessdesk {
         session.reviewer = Some(kind);
         let mut game = session.game.clone();
         cx.notify();
-        let config = helper_config(kind);
         cx.spawn(async move |this, cx| {
             let reviewed = cx
                 .background_spawn(async move {
-                    review_game(&config, &mut game).map(|(added, tokens)| (game, added, tokens))
+                    review_game(&config, &mut game).map(|review| (game, review))
                 })
                 .await;
             this.update(cx, |this, cx| this.on_reviewed(id, reviewed, cx))
@@ -1386,7 +1431,7 @@ impl Chessdesk {
     fn on_reviewed(
         &mut self,
         id: SessionId,
-        reviewed: Result<(Game, usize, Option<Tokens>), PlayerError>,
+        reviewed: Result<(Game, Review), PlayerError>,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self.session_mut(id) else {
@@ -1394,10 +1439,27 @@ impl Chessdesk {
         };
         session.reviewer = None;
         match reviewed {
-            Ok((_, 0, _)) => self.report(tr("review-empty"), cx),
-            Ok((mut game, _, tokens)) => {
+            Ok((
+                _,
+                Review {
+                    comments: 0,
+                    summary: None,
+                    ..
+                },
+            )) => {
+                self.report(tr("review-empty"), cx);
+            }
+            Ok((
+                mut game,
+                Review {
+                    summary, tokens, ..
+                },
+            )) => {
                 // Notes typed while the review ran are newer than its copy.
                 game.notes = std::mem::take(&mut session.game.notes);
+                if let Some(summary) = summary {
+                    game.set_tag(SUMMARY_TAG, summary);
+                }
                 let first = game
                     .moves()
                     .iter()

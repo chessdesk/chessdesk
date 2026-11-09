@@ -1,0 +1,21 @@
+# A game that ends: Stockfish goes over it by itself, the moves open with Stockfish's marks
+# beside the bad ones, the panel shows each side's accuracy, and an agent's review adds its
+# summary. The review spends tokens; pass another agent or model to `review` as you like.
+timeout 180
+new white
+# Weakening moves that are legal whatever Black answers.
+play f3 Kf2
+resign
+show end
+screenshot shots/analysis-1-finished.png
+show 1
+screenshot shots/analysis-2-first-move.png
+show 3
+screenshot shots/analysis-3-king-walk.png
+review pi model openrouter/z-ai/glm-5.3-flash
+# A move's comment on its own; the summary waits for the end.
+show 3
+screenshot shots/analysis-4-comment.png
+show end
+screenshot shots/analysis-5-summary.png
+discard
