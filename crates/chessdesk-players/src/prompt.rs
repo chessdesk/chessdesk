@@ -5,6 +5,8 @@ use std::fmt::Write as _;
 
 use chessdesk_core::review::{SUMMARY_TAG, Verdict};
 use chessdesk_core::{Game, pgn};
+
+use crate::illegal;
 use shakmaty::san::San;
 use shakmaty::{Chess, Color, Position, Role};
 
@@ -196,17 +198,25 @@ pub fn with_instructions(text: String, instructions: &str, told: &str) -> String
 
 /// Sent after a reply without a legal move. Only now is the list worth its tokens. The
 /// player never sees the failed reply, which models otherwise apologised for in the next
-/// comment, or thanked them for the list.
-pub fn retry(position: &Chess) -> String {
+/// comment, or thanked them for the list. If the reply named a move, it hears why that one
+/// can't be played: it came from a misread board, which the reason puts right.
+pub fn retry(position: &Chess, attempted: Option<San>) -> String {
     let moves: Vec<_> = position
         .legal_moves()
         .iter()
         .map(|played| San::from_move(position, *played).to_string())
         .collect();
-    format!("{RETRY} Legal moves: {}", moves.join(" "))
+    let reason = attempted
+        .and_then(|san| Some(format!(" {san}: {}.", illegal::why(san, position)?)))
+        .unwrap_or_default();
+    format!("{ILLEGAL}{reason} {AGAIN} Legal moves: {}", moves.join(" "))
 }
 
-const RETRY: &str = "Illegal, and the player didn't see it: reply as if it never happened.";
+const ILLEGAL: &str = "Illegal.";
+/// Told why, models wrote about the try in the next comment ("Wrong pawn file, my mistake"),
+/// which the player never saw: hence the plain ban.
+const AGAIN: &str = "The player never saw that move. Play another, and leave the try out \
+                     of your comment: don't mention it.";
 
 fn moves_text(game: &Game) -> String {
     game.moves()
@@ -384,11 +394,19 @@ mod tests {
 
     #[test]
     fn retry_lists_every_legal_move() {
-        let text = retry(&Chess::default());
+        let text = retry(&Chess::default(), None);
         let (said, moves) = text.split_once(" Legal moves: ").unwrap();
-        assert_eq!(said, RETRY);
+        assert_eq!(said, format!("{ILLEGAL} {AGAIN}"));
         assert_eq!(moves.split_whitespace().count(), 20);
         assert!(moves.contains("Nf3"));
+    }
+
+    #[test]
+    fn retry_says_why_the_move_was_illegal() {
+        let e5 = "e5".parse().unwrap();
+        let text = retry(&Chess::default(), Some(e5));
+        assert!(text.starts_with(&format!("{ILLEGAL} e5: no pawn of yours reaches e5 (")));
+        assert!(text.contains(&format!(". {AGAIN} Legal moves: ")));
     }
 
     #[test]

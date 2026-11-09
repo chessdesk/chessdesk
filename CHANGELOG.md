@@ -3,6 +3,14 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.7.1 - 2026-11-09
+
+### Fixed
+
+- When an agent tries an illegal move, it's told why, such as a pawn of its own in the way or a
+  bishop it no longer has, along with the legal moves. Given only the list, it misread the board
+  again and grabbed the first capture, which could cost it its queen
+
 ## 2.7.0 - 2026-11-09
 
 ### Added
