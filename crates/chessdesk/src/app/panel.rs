@@ -319,7 +319,7 @@ fn render_bubble(text: String, settings: &Settings) -> Div {
 }
 
 /// How the game ended, in the colour of how it went for the player, with what going over it
-/// found: each side's accuracy, the player's first, and an agent's summary of its review.
+/// found: each side's accuracy, the player's first, and at the end, an agent's summary.
 fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
     let game = &session.game;
     let standing = standing(game)?;
@@ -361,9 +361,10 @@ fn render_result(session: &Session, settings: &Settings) -> Option<Div> {
                 ))),
         )
     });
+    // The word on the whole game, where it ended. Before that, the moves' own comments speak.
     let summary = game
         .tag(SUMMARY_TAG)
-        .filter(|text| !text.is_empty())
+        .filter(|text| !text.is_empty() && session.at_latest())
         .map(|text| div().pt_1().text_color(colors.text).child(text.to_owned()));
     Some(
         div()

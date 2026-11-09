@@ -181,7 +181,7 @@ fn comment_text(text: &str, moved: &str) -> String {
 /// that don't name a move of the game are skipped, so a wrong line costs only itself.
 pub fn apply_review(reply: &str, game: &mut Game) -> usize {
     let mut applied = 0;
-    for line in reply.lines() {
+    for line in one_move_per_line(reply).lines() {
         let Some((index, rest)) = review_line(line, game) else {
             continue;
         };
@@ -195,6 +195,35 @@ pub fn apply_review(reply: &str, game: &mut Game) -> usize {
         }
     }
     applied
+}
+
+/// Starts a new line at each move number outside a comment. Models sometimes write several
+/// moves on one line, `1. f3 {…} 2. Kf2 {…}`, which would give the first all the comments.
+/// Numbers inside a comment, as in "after 1. f3", are words, and stay.
+fn one_move_per_line(reply: &str) -> String {
+    let mut split = String::with_capacity(reply.len());
+    let mut depth = 0usize;
+    let mut previous = '\n';
+    let mut chars = reply.chars().peekable();
+    while let Some(next) = chars.next() {
+        match next {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        let starts_number = next.is_ascii_digit() && !previous.is_ascii_digit();
+        if depth == 0 && starts_number && previous == ' ' && is_move_number(chars.clone()) {
+            split.push('\n');
+        }
+        split.push(next);
+        previous = next;
+    }
+    split
+}
+
+/// Whether what follows a digit continues a move number: more digits, then a dot.
+fn is_move_number(mut rest: impl Iterator<Item = char>) -> bool {
+    rest.find(|next| !next.is_ascii_digit()) == Some('.')
 }
 
 /// The review's closing line, `Summary {how it went}`, as one line of plain text.
@@ -453,6 +482,22 @@ mod tests {
         assert_eq!(game.moves()[0].annotations.highlights.len(), 1);
         assert_eq!(game.moves()[3].annotations.arrows.len(), 1);
         assert!(game.moves()[2].annotations.is_empty());
+    }
+
+    #[test]
+    fn moves_on_one_line_each_get_their_own_comment() {
+        // As GLM 5.3 Flash wrote it, with a move number in the prose that isn't a move.
+        let mut game = after(&["f3", "Nf6", "Kf2"]);
+        let reply = "1. f3 {Weakens the king, after 1. f3 the e1-h4 line opens.} \
+                     [%csl Rf3] 2. Kf2 {King on f2 already.} [%cal Gd2d4]\n\
+                     Summary {Develop first.}";
+        assert_eq!(apply_review(reply, &mut game), 2);
+        assert_eq!(
+            game.moves()[0].annotations.text,
+            "Weakens the king, after 1. f3 the e1-h4 line opens."
+        );
+        assert_eq!(game.moves()[2].annotations.text, "King on f2 already.");
+        assert_eq!(game.moves()[2].annotations.arrows.len(), 1);
     }
 
     #[test]

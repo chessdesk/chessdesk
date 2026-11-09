@@ -11,12 +11,18 @@ minor versions bring features, patch versions only fixes.
   stay with the game, so Analyze no longer offers Stockfish for a game it has been over
 - The game panel shows how accurately you and your opponent played, worked out by that analysis
 - Moves Stockfish found fault with carry Chessdesk's mark in the move list; hover it for why
-- An agent's review ends with a short summary of the game, kept with it and shown in the panel
+- An agent's review ends with a short summary of the game, kept with it and shown with the result
+  on the final position
 - Opening a finished game opens its moves
 
 ### Changed
 
 - The first start always downloads Stockfish: analysis, hints and the likelihood need it
+
+### Fixed
+
+- A review that put several moves on one line gave all their comments to the first move; each
+  move now gets its own
 
 ## 2.6.1 - 2026-11-08
 

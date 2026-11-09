@@ -13,6 +13,9 @@ screenshot shots/analysis-2-first-move.png
 show 3
 screenshot shots/analysis-3-king-walk.png
 review pi model openrouter/z-ai/glm-5.3-flash
+# A move's comment on its own; the summary waits for the end.
+show 3
+screenshot shots/analysis-4-comment.png
 show end
-screenshot shots/analysis-4-summary.png
+screenshot shots/analysis-5-summary.png
 discard
