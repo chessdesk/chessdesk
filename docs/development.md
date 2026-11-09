@@ -88,7 +88,7 @@ debug build: a release build on Windows has no console to print to.
 
 One command per line; `#` starts a comment, and paths are relative to the script. Each command
 first waits until the game on show has settled: no opponent or agent at work, no evaluation or
-analysis running, no pieces moving.
+analysis running, no pieces moving, and no agent being asked for its models.
 
 | Command | Does |
 |---|---|
@@ -100,6 +100,7 @@ analysis running, no pieces moving.
 | `review AGENT [model MODEL]` | An agent's review: `claude-code`, `codex`, `copilot`, `opencode` or `pi`, on a model as the agent names it (New Game's model list shows them), e.g. `review pi model openrouter/z-ai/glm-5.3-flash`. Spends tokens. |
 | `show N\|end` | Shows the position after N half-moves, or the last. |
 | `screenshot PATH` | Saves the window as a PNG, after waiting for animations to finish. |
+| `settings PAGE` | Opens a settings page in the board's place: `appearance`, `board`, `sound`, `engines`, `agents`, `keys`, `plugins` or `updates`. |
 | `timeout SECONDS` | How long later commands may wait for the game to settle (default 60). Raise it for agents. |
 | `discard` | Moves the game on show to the Recycle Bin. |
 

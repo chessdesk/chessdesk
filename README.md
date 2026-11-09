@@ -92,8 +92,9 @@ Everything is under Settings (`Ctrl+,`), and the new game dialog tells you if so
 Agents use your own account, so moves cost tokens. Chessdesk tries hard to keep that small: the rules,
 the clock and the analysis all run on your machine, and an agent only gets the last move and the
 position. A move is about 1,000 tokens on Claude, most of it cached, and reviewing a short game about
-2,000. You can set a token budget for a game, which pauses it when it's used up. Hover over the
-opponent's name to see what a game has used so far.
+2,000; pick the model reviews and hints use under Settings, Agents. You can set a token budget
+for a game, which pauses it when it's used up. Hover over the opponent's name to see what a game
+has used so far.
 
 If an agent can't come up with a legal move, it gets one more try with the legal moves spelled out.
 After that the game pauses and you decide. Chessdesk never makes up a move for it. The same goes for

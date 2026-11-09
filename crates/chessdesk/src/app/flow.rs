@@ -109,12 +109,12 @@ fn resumed_clock(game: &Game, setup: &Setup) -> Option<Clock> {
     Some(clock)
 }
 
-/// An agent asked for help rather than to play: reviews and hints. Claude gets Sonnet, which
-/// explains as well for less; the others their own default.
-pub(super) fn helper_config(kind: AgentKind) -> AgentConfig {
+/// An agent asked for help rather than to play: reviews and hints, on the model picked for
+/// them under Settings, Agents. Claude ships with Sonnet, which explains as well for less.
+pub(super) fn helper_config(kind: AgentKind, settings: &Settings) -> AgentConfig {
     AgentConfig {
         kind,
-        model: (kind == AgentKind::ClaudeCode).then(|| "sonnet".to_owned()),
+        model: settings.analysis_model(kind),
         effort: Effort::Medium,
         adapters: Settings::adapters_dir().unwrap_or_default(),
         reply_language: i18n::reply_language(),
@@ -1039,7 +1039,7 @@ impl Chessdesk {
         session.suggesting = true;
         let ply = session.ply;
         let position = session.game.position_at(ply);
-        let config = helper_config(kind);
+        let config = helper_config(kind, &Settings::get(cx));
         cx.notify();
         cx.spawn(async move |this, cx| {
             let hint = cx
@@ -1390,7 +1390,7 @@ impl Chessdesk {
 
     /// Has an agent comment on the game on show, in one call.
     pub(super) fn review_with(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
-        self.review_using(helper_config(kind), cx);
+        self.review_using(helper_config(kind, &Settings::get(cx)), cx);
     }
 
     /// Has an agent set up as `config` review the game on show.

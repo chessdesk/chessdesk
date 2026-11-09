@@ -1,0 +1,4 @@
+# The Agents page: each agent's set-up, then the model each one that's ready reviews games and
+# gives hints with. Asking the agents for their models takes a few seconds but no tokens.
+settings agents
+screenshot shots/agents.png

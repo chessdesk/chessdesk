@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chessdesk_players::acp::{self, AgentConfig, AgentKind, Effort, Models};
-use gpui::{AppContext, Context};
+use gpui::{AppContext, Context, SharedString};
 use serde::{Deserialize, Serialize};
 
-use crate::i18n::tr_with;
+use crate::i18n::{tr, tr_with};
 use crate::settings::Settings;
 use crate::ui::Activity;
 
@@ -59,6 +59,42 @@ fn store_saved(saved: &SavedModels) -> Result<(), String> {
     }
     let text = toml::to_string(saved).map_err(|error| error.to_string())?;
     fs::write(path, text).map_err(|error| error.to_string())
+}
+
+/// A model to pick: what it shows as, and what it's asked for by, `None` being the agent's
+/// own default.
+pub type ModelEntry = (SharedString, Option<String>);
+
+/// Longer lists than this get a field to type in, to narrow them.
+pub const MAX_PLAIN_MODELS: usize = 5;
+
+/// The models `offer` has to pick from, the agent's default first. `chosen` joins them if
+/// it's not among them: typed, or remembered from before.
+pub fn model_entries(offer: Option<&Models>, chosen: Option<&str>) -> Vec<ModelEntry> {
+    let default = offer.map(|models| {
+        models
+            .find(&models.current)
+            .map_or(models.current.as_str(), |model| model.name.as_str())
+    });
+    let mut entries: Vec<ModelEntry> = vec![(
+        default.map_or_else(
+            || tr("model-agent-default"),
+            |name| tr_with!("model-default", model = name),
+        ),
+        None,
+    )];
+    entries.extend(offer.into_iter().flat_map(|models| {
+        models
+            .choices
+            .iter()
+            .map(|model| (model.name.clone().into(), Some(model.id.clone())))
+    }));
+    if let Some(chosen) = chosen
+        && !entries.iter().any(|(_, id)| id.as_deref() == Some(chosen))
+    {
+        entries.push((chosen.to_owned().into(), Some(chosen.to_owned())));
+    }
+    entries
 }
 
 /// What's known of one agent's models.
@@ -210,6 +246,24 @@ mod tests {
         ]);
         let text = toml::to_string(&saved).unwrap();
         assert_eq!(toml::from_str::<SavedModels>(&text).unwrap(), saved);
+    }
+
+    #[test]
+    fn the_agents_default_comes_first_and_a_typed_model_stays() {
+        let models = Models {
+            option: Some("model".to_owned()),
+            current: "opus".to_owned(),
+            choices: vec![Model {
+                id: "opus".to_owned(),
+                name: "Opus 5.5".to_owned(),
+                description: None,
+            }],
+        };
+        let entries = model_entries(Some(&models), Some("my-model"));
+        let ids: Vec<_> = entries.iter().map(|(_, id)| id.as_deref()).collect();
+        assert_eq!(ids, [None, Some("opus"), Some("my-model")]);
+        assert_eq!(entries[0].0, "Default (Opus 5.5)");
+        assert_eq!(model_entries(None, None)[0].0, "The agent's default");
     }
 
     #[test]

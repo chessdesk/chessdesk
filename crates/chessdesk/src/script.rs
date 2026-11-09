@@ -8,6 +8,8 @@ use std::time::Duration;
 use chessdesk_players::acp::AgentKind;
 use shakmaty::Color;
 
+use crate::settings_view::SettingsPage;
+
 /// Stockfish's strength in a scripted game unless the script says otherwise: the weakest, and
 /// so the quickest to answer.
 pub const DEFAULT_ELO: u32 = 1320;
@@ -35,6 +37,8 @@ pub enum Command {
     /// How long a command may wait for the game to settle, from here on.
     Timeout(Duration),
     Screenshot(PathBuf),
+    /// Opens a page of the settings, in the board's place.
+    Settings(SettingsPage),
     /// Moves the game on show to the Recycle Bin, so that it doesn't stay in the history.
     Discard,
 }
@@ -111,6 +115,11 @@ fn command(text: &str, base: &Path) -> Result<Command, String> {
             .map(|seconds| Command::Timeout(Duration::from_secs(seconds)))
             .map_err(|_| "`timeout` takes seconds".to_owned()),
         "screenshot" => path().map(Command::Screenshot),
+        "settings" => SettingsPage::ALL
+            .into_iter()
+            .find(|page| page.id() == rest)
+            .map(Command::Settings)
+            .ok_or_else(|| format!("no settings page `{rest}`")),
         "discard" => alone(Command::Discard),
         _ => Err(format!("unknown command `{word}`")),
     }
@@ -165,10 +174,7 @@ fn review(rest: &str) -> Result<Command, String> {
 
 /// An agent as a script names it: its name in lower case, words joined by `-`.
 fn agent(name: &str) -> Result<AgentKind, String> {
-    AgentKind::ALL
-        .into_iter()
-        .find(|kind| kind.name().to_lowercase().replace(' ', "-") == name)
-        .ok_or_else(|| format!("unknown agent `{name}`"))
+    AgentKind::from_id(name).ok_or_else(|| format!("unknown agent `{name}`"))
 }
 
 #[cfg(test)]
@@ -239,6 +245,11 @@ mod tests {
         );
         assert!(one("review pi fast").is_err());
         assert_eq!(one("show 3"), Ok(Command::Show(Ply::At(3))));
+        assert_eq!(
+            one("settings agents"),
+            Ok(Command::Settings(SettingsPage::Agents))
+        );
+        assert!(one("settings nowhere").is_err());
         assert_eq!(
             one("timeout 90"),
             Ok(Command::Timeout(Duration::from_secs(90)))

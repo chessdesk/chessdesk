@@ -79,6 +79,22 @@ impl AgentKind {
         Self::Pi,
     ];
 
+    /// How the agent is named in files and scripts: `claude-code`, `pi`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+            Self::Copilot => "copilot",
+            Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+        }
+    }
+
+    /// The agent an [`id`](Self::id) names.
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.id() == id)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::ClaudeCode => "Claude Code",

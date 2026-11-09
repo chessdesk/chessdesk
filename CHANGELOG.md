@@ -3,6 +3,15 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.8.0 - 2026-11-09
+
+### Added
+
+- Pick the model each agent reviews games and gives hints with, under Settings, Agents. Until now
+  they used whatever the agent's own default was, which could be any model. Claude Code starts on
+  Sonnet
+- The welcome asks for those models in a third step, once an agent is set up
+
 ## 2.7.1 - 2026-11-09
 
 ### Fixed
