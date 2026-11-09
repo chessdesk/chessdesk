@@ -16,6 +16,8 @@ mod new_game;
 mod onboarding;
 mod reset;
 mod scenario;
+mod screenshot;
+mod script;
 mod settings;
 mod settings_view;
 mod setup;
@@ -24,6 +26,7 @@ mod trace;
 mod ui;
 
 use std::borrow::Cow;
+use std::path::Path;
 use std::process::ExitCode;
 
 use gpui::{
@@ -37,10 +40,28 @@ use settings::Settings;
 /// The interface font. Bundled, so that it works without being installed.
 const FONT: &[u8] = include_bytes!("../assets/fonts/Geist.ttf");
 
+/// Reads the script `chessdesk script <file>` names.
+fn read_script(path: Option<String>) -> Result<Vec<script::Step>, String> {
+    let path = path.ok_or("usage: chessdesk script <file>")?;
+    let path = Path::new(&path);
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    script::parse(&text, path.parent().unwrap_or(Path::new("")))
+}
+
 fn main() -> ExitCode {
-    if std::env::args().nth(1).as_deref() == Some("reset") {
-        return reset::run();
-    }
+    let mut args = std::env::args().skip(1);
+    let script = match args.next().as_deref() {
+        Some("reset") => return reset::run(),
+        Some("script") => match read_script(args.next()) {
+            Ok(steps) => Some(steps),
+            Err(error) => {
+                eprintln!("script: {error}");
+                return ExitCode::from(2);
+            }
+        },
+        _ => None,
+    };
     Application::new()
         .with_assets(ui::Assets)
         .run(move |cx: &mut App| {
@@ -83,11 +104,21 @@ fn main() -> ExitCode {
                 }),
                 ..Default::default()
             };
+            let scripted = script.is_some();
             let window = cx.open_window(options, |window, cx| {
-                cx.new(|cx| Chessdesk::new(errors, window, cx))
+                cx.new(|cx| Chessdesk::new(errors, scripted, window, cx))
             });
-            if let Err(error) = window {
-                panic!("could not open the window: {error}");
+            let window = match window {
+                Ok(window) => window,
+                Err(error) => panic!("could not open the window: {error}"),
+            };
+            if let Some(steps) = script {
+                let started = window.update(cx, |_, window, cx| {
+                    Chessdesk::run_script(steps, window, cx);
+                });
+                if let Err(error) = started {
+                    panic!("could not start the script: {error}");
+                }
             }
             cx.activate(true);
         });

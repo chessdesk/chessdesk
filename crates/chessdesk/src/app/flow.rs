@@ -111,7 +111,7 @@ fn resumed_clock(game: &Game, setup: &Setup) -> Option<Clock> {
 
 /// An agent asked for help rather than to play: reviews and hints. Claude gets Sonnet, which
 /// explains as well for less; the others their own default.
-fn helper_config(kind: AgentKind) -> AgentConfig {
+pub(super) fn helper_config(kind: AgentKind) -> AgentConfig {
     AgentConfig {
         kind,
         model: (kind == AgentKind::ClaudeCode).then(|| "sonnet".to_owned()),
@@ -133,6 +133,11 @@ impl Chessdesk {
         if let Err(error) = setup.save() {
             self.report(tr_with!("error-remember-choices", error = error), cx);
         }
+        self.begin_game(setup, cx);
+    }
+
+    /// Starts a game without keeping its setup as New Game's next choices: scripts use this.
+    pub(super) fn begin_game(&mut self, setup: Setup, cx: &mut Context<Self>) {
         let Some(position) = setup.start_position() else {
             self.report(tr("invalid-position"), cx);
             return;
@@ -579,7 +584,7 @@ impl Chessdesk {
         cx.notify();
     }
 
-    fn play(
+    pub(super) fn play(
         &mut self,
         id: SessionId,
         played: Move,
@@ -1385,6 +1390,12 @@ impl Chessdesk {
 
     /// Has an agent comment on the game on show, in one call.
     pub(super) fn review_with(&mut self, kind: AgentKind, cx: &mut Context<Self>) {
+        self.review_using(helper_config(kind), cx);
+    }
+
+    /// Has an agent set up as `config` review the game on show.
+    pub(super) fn review_using(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
+        let kind = config.kind;
         let id = self.active;
         let Some(session) = self.session_mut(id) else {
             return;
@@ -1405,7 +1416,6 @@ impl Chessdesk {
         session.reviewer = Some(kind);
         let mut game = session.game.clone();
         cx.notify();
-        let config = helper_config(kind);
         cx.spawn(async move |this, cx| {
             let reviewed = cx
                 .background_spawn(async move {

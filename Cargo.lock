@@ -975,6 +975,7 @@ dependencies = [
  "notify",
  "nucleo-matcher",
  "proptest",
+ "raw-window-handle",
  "rodio",
  "serde",
  "shakmaty",

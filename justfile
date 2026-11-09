@@ -7,6 +7,10 @@ run *args:
 reset:
     cargo run -- reset
 
+# Drives the app through a script and takes its screenshots, e.g. crates/chessdesk/scripts/mate.txt.
+script file:
+    cargo run -- script {{ file }}
+
 release:
     cargo build --release
 

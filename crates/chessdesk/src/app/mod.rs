@@ -7,6 +7,7 @@ mod flow;
 mod history;
 mod motion;
 mod panel;
+mod scripted;
 mod session;
 
 use std::path::Path;
@@ -173,7 +174,14 @@ pub struct Chessdesk {
 }
 
 impl Chessdesk {
-    pub fn new(errors: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The app's window. A `scripted` one skips the welcome, New Game and the update check, and
+    /// waits for [`Self::run_script`].
+    pub fn new(
+        errors: Vec<String>,
+        scripted: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
         watch_settings(cx);
@@ -191,7 +199,7 @@ impl Chessdesk {
         });
         // Not from a build being worked on, which is never behind and would only use up
         // GitHub's allowance for the engine downloads.
-        if !cfg!(debug_assertions) {
+        if !cfg!(debug_assertions) && !scripted {
             installs.update(cx, |installs, cx| installs.check_for_update(true, cx));
         }
         let mut this = Self {
@@ -236,7 +244,9 @@ impl Chessdesk {
             this.trace.record(&error);
             this.errors.push(error.into());
         }
-        if Settings::is_first_run() {
+        if scripted {
+            // The script decides what shows.
+        } else if Settings::is_first_run() {
             this.show_onboarding(cx);
         } else if this.history.is_empty() {
             this.show_new_game(cx);
