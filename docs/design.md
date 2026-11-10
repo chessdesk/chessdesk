@@ -42,7 +42,12 @@ Pi plays with its coding prompt, its tools (bash, edit, sub-agents, `codemode`),
 program from `PI_ACP_PI_COMMAND`, so Chessdesk writes a launcher next to the agent folder that starts
 `pi --no-tools --no-extensions --no-mcp --no-skills --no-context-files --no-prompt-templates
 --system-prompt <file>` (`pi.rs`). Its thinking level is an ACP setting in the `thought_level`
-category, which Chessdesk sets to the effort for any agent that offers it. Measured on 2026-11-08
+category, which Chessdesk sets to the effort for any agent that offers it. The levels differ per
+model and show only once the session is switched to it (GLM 5.3 Flash in Pi: off, low, high, max;
+Haiku 4.5 in Claude Code: no setting at all), so Chessdesk asks each model once, without a prompt,
+keeps the answer in `efforts.toml` for a day, lists only those, and falls back to the nearest
+level a model has. Left alone, a level the model lacked was skipped and the session stayed on
+Pi's default. Measured on 2026-11-08
 with DeepSeek V4.1 Flash on low: Pi's own part of the prompt is the working folder, 140
 characters. The first turns took 700 to 800 tokens; 26 turns took 125,000, mostly reasoning, for
 $0.036. `pi-acp` reports no usage over ACP, so games show tokens as not reported. On one turn the
@@ -106,10 +111,36 @@ of the network's name. It's a rough fit to a few reports, not a measurement.
 
 - All chess logic is local: legality, game end, analysis, likelihood.
 - One session per game, so that the provider's prompt cache serves everything said so far.
-- A turn is the last move, where every piece stands, and the FEN. The FEN keeps takebacks right
-  without a new session. The piece list, about 60 tokens, is there because models read the FEN
-  badly: every blunder traced in the 2.6.0 games came from a piece the model had lost track of, a
-  rook on an open file or a guarded square, and Opus on low announced a fork that wasn't one.
+- A turn is the agent's own last move and the player's reply, where every piece stands, and the
+  FEN. The FEN keeps takebacks right without a new session. The piece list, about 60 tokens, is
+  there because models read the FEN badly: every blunder traced in the 2.6.0 games came from a
+  piece the model had lost track of, a rook on an open file or a guarded square, and Opus on low
+  announced a fork that wasn't one.
+- Both moves are spelled out with the square each left and what it took (`You: Nc3xb5, taking a
+  pawn`), about 15 tokens, and the list marks the agent's side. SAN says only where a piece went,
+  and the list doesn't say what changed, so models went on from their own earlier reasoning: in
+  the Sicilian lesson of 2026-11-09, GLM 5.3 Flash credited Nxb5 to its b3 knight and then tried
+  Nxe4 with the knight that had left c3. Replaying that game in Pi up to that turn, 12 times in
+  the old format and 24 in the new, the first try was illegal in 7 of 12 against 7 of 24, and
+  the departed knight was moved in 4 of 12 against 4 of 24. A move the app plays for the agent,
+  forced, now reaches it this way too. Models copy the notation: DeepSeek V4.1 Flash answered
+  `Bf8-g7`, which read as no move until the parser took the dash out. Asking the agent to write its own moves with their start
+  square, so that a wrong one would go to the retry, did nothing in that replay: with ten SAN
+  replies before it in the session, GLM wrote none.
+- A reply in the asked-for shape, a move and then its comment, chose that move: if it's
+  illegal, the reply goes to the retry, even when the comment names a legal move that would
+  otherwise have been played instead. A reply that opens with prose is read leniently: GLM 5.3
+  Flash often starts with the player's move ("Be2's fine, but… Nf6"), and taking that as its
+  own sent 25 of 30 turns of one game to the retry.
+- A `[%next]` the player can't play gets one retry of the whole reply, with why, said about
+  the player: "Illegal [%next Nc5]: no knight of theirs reaches c5 (their knights: b1, g1)".
+  Dropped silently, it was illegal in up to a third of a lesson's turns in the games of
+  2026-11-09, and the comment told the player to play it with no arrow drawn; GLM 5.3 Flash
+  named its own move there for a whole lesson. The check is the rules only, not Stockfish, so
+  a lesson may still teach a bad move. At most one retry a turn: after one for the agent's
+  move, an unplayable next move is still dropped.
+- Comments may not mention Stockfish or an engine: told only not to name Stockfish, models
+  wrote "the engine agrees" and "my engine's growling".
 - A lesson the player asks for is theirs to play: the agent names their next move each turn as
   `[%next SAN]`, and plays the replies that let it work. Asked to teach a fast mate, GLM 5.3 Flash
   set out to mate the player instead, until the prompt said a mate to learn is one they give. It
@@ -127,7 +158,9 @@ of the network's name. It's a rough fit to a few reports, not a measurement.
   every turn would play the tactics for it, and a weak model would play far above itself. Told
   why, the model wrote about its try in the next comment, which the player never saw, until the
   retry said plainly to leave it out: in two games of 37 and 16 moves, 15 and 7 tries, all
-  answered with a legal move but one.
+  answered with a legal move but one. A reason has to be true: Rd8 with rooks on a8 and e8 is
+  ambiguous, not illegal, and fell through to "your rook on a8 is pinned", a misread handed to
+  the model by the harness, twice in one game. It now names both rooks and how to write each.
 - Forced moves skip the agent, unless it coaches: the move that forced it is often the player's worst.
 - A review is one call, covering each of the player's moves.
 

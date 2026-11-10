@@ -215,11 +215,25 @@ impl NewGame {
         dialog
     }
 
-    /// Asks the agent picked which models it offers, if that's not known yet.
+    /// Asks the agent picked which models it offers, and which efforts the model picked
+    /// offers, where that's not known yet.
     fn ask_for_models(&mut self, cx: &mut Context<Self>) {
         if let Some(kind) = self.setup.opponent.agent() {
-            self.catalog.update(cx, |catalog, cx| catalog.ask(kind, cx));
+            let model = self.setup.model.clone();
+            self.catalog.update(cx, |catalog, cx| {
+                catalog.ask(kind, cx);
+                catalog.ask_efforts(kind, model.as_deref(), cx);
+            });
         }
+    }
+
+    /// The efforts the agent picked offers with the model picked, once known.
+    fn efforts(&self, cx: &Context<Self>) -> Option<Vec<Effort>> {
+        let kind = self.setup.opponent.agent()?;
+        let catalog = self.catalog.read(cx);
+        catalog
+            .efforts(kind, self.setup.model.as_deref())
+            .map(<[Effort]>::to_vec)
     }
 
     /// The agent's models to pick from: a select, or for a long list or none at all, one
@@ -308,6 +322,7 @@ impl NewGame {
                 combobox::Event::Dismissed => {}
             }
             this.combobox = None;
+            this.ask_for_models(cx);
             cx.notify();
         });
         self.open = None;
@@ -414,7 +429,7 @@ impl NewGame {
         label: SharedString,
         value: SharedString,
         (count, index): (usize, usize),
-        pick: fn(&mut Setup, usize),
+        pick: impl Fn(&mut Setup, usize) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -533,23 +548,38 @@ impl NewGame {
         }
     }
 
-    /// For agents, how hard they think takes the place of how well they play.
-    fn effort_row(window: &mut Window, cx: &mut Context<Self>, effort: Effort) -> AnyElement {
-        let index = Effort::ALL
-            .iter()
-            .position(|known| *known == effort)
-            .unwrap_or(0);
+    /// For agents, how hard they think takes the place of how well they play: the efforts
+    /// the model offers, none for one that has no choice, and a wait while that's asked.
+    fn effort_row(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let settings = Settings::get(cx);
+        let Some(efforts) = self.efforts(cx) else {
+            let asking = ui::select_button("effort", tr("efforts-asking"), None, false, &settings)
+                .cursor_default();
+            return Some(
+                ui::setting_row(tr("reasoning-effort"), None, &settings)
+                    .child(asking)
+                    .into_any_element(),
+            );
+        };
+        let effort = self.setup.effort.nearest(&efforts)?;
         let value = tr_with!("effort-value", effort = effort_label(effort).to_string());
-        let pick = |setup: &mut Setup, stop: usize| setup.effort = Effort::ALL[stop];
-        Self::level_row(
+        if efforts.len() == 1 {
+            return Some(
+                ui::setting_row(tr("reasoning-effort"), Some(value), &settings).into_any_element(),
+            );
+        }
+        let index = efforts.iter().position(|known| *known == effort)?;
+        let count = efforts.len();
+        let pick = move |setup: &mut Setup, stop: usize| setup.effort = efforts[stop];
+        Some(Self::level_row(
             "effort",
             tr("reasoning-effort"),
             value,
-            (Effort::ALL.len(), index),
+            (count, index),
             pick,
             window,
             cx,
-        )
+        ))
     }
 
     /// Reads a position from the clipboard, the one way a FEN gets in here.
@@ -758,7 +788,7 @@ impl NewGame {
             cx,
         ));
         if is_agent {
-            rows.push(Self::effort_row(window, cx, setup.effort));
+            rows.extend(self.effort_row(window, cx));
             let budget = Field {
                 hint: Some(tr("token-budget-hint")),
                 ..field("budget", "token-budget")
@@ -936,6 +966,13 @@ impl NewGame {
                         .text()
                         .trim()
                         .clone_into(&mut setup.instructions);
+                    // The effort shown, where the one remembered isn't the model's.
+                    if let Some(effort) = this
+                        .efforts(cx)
+                        .and_then(|efforts| setup.effort.nearest(&efforts))
+                    {
+                        setup.effort = effort;
+                    }
                     // The default's name too, so that the game says who plays.
                     if let Some(kind) = setup.opponent.agent()
                         && let Some(name) = this

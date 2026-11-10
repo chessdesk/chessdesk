@@ -72,6 +72,7 @@ activity-analyzing = Stockfish 正在分析，第 { $done } / { $all } 步
 activity-downloading = 正在下载 { $name }，{ $percent }%
 activity-installing = 正在安装 { $agent } 适配器
 activity-asking-models = 正在询问 { $agent } 有哪些模型
+activity-asking-efforts = 正在询问 { $agent } 有哪些推理强度
 
 ## Game history
 
@@ -145,6 +146,7 @@ analysis-models-hint = 你点击分析或请求提示时，每个智能体使用
 welcome-models = 复盘和提示所用的模型
 welcome-models-intro = 你点击分析或请求提示时，每个智能体使用的模型。之后可以在设置的智能体页面中更改。
 models-asking = 正在获取模型…
+efforts-asking = 正在获取推理强度…
 models-unknown = 无法获取模型：{ $error }
 reasoning-effort = 推理强度
 effort-value = { $effort }。越高消耗的 token 越多

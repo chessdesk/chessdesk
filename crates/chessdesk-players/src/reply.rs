@@ -27,7 +27,22 @@ fn clean(word: &str) -> Cow<'_, str> {
         .find_map(|possessive| word.strip_suffix(possessive))
         .unwrap_or(word);
     let word = without_move_number(word).trim_end_matches(['.', '!', '?', ':']);
-    castling(word).map_or(Cow::Borrowed(word), Cow::Owned)
+    if let Some(castle) = castling(word) {
+        return Cow::Owned(castle);
+    }
+    without_dash(word).map_or(Cow::Borrowed(word), Cow::Owned)
+}
+
+/// `Bf8g7` from `Bf8-g7`: SAN with the square it left, as the turns spell moves out, which
+/// models copy.
+fn without_dash(word: &str) -> Option<String> {
+    let dash = word.find('-')?;
+    let square = |at: &str| {
+        let mut chars = at.chars();
+        matches!(chars.next(), Some('a'..='h')) && matches!(chars.next(), Some('1'..='8'))
+    };
+    (dash >= 2 && square(&word[dash - 2..dash]) && square(&word[dash + 1..]))
+        .then(|| format!("{}{}", &word[..dash], &word[dash + 1..]))
 }
 
 /// `e4` from `1.e4` and `e5` from `1...e5`. Digits without dots are left: `0-0` is a move.
@@ -63,6 +78,27 @@ fn parse_move(word: &str, position: &Chess) -> Option<Move> {
 /// The move a reply meant, legal or not: the first word outside its comment and markup that
 /// reads as SAN. For telling the agent why it can't be played.
 pub fn attempted(reply: &str) -> Option<San> {
+    leading_move(reply)?
+        .parse::<shakmaty::san::SanPlus>()
+        .ok()
+        .map(|san| san.san)
+}
+
+/// The reply's first word, if it reads as a move and nothing but a comment, markup or the
+/// end follows it: `Nxe5 {Or Nf3.}`, not `Be2's fine, so Nf6`.
+fn opening_move(reply: &str) -> Option<&str> {
+    let reply = reply.trim_start();
+    let end = reply.find(char::is_whitespace).unwrap_or(reply.len());
+    let (first, rest) = reply.split_at(end);
+    let rest = rest.trim_start();
+    let alone = rest.is_empty() || rest.starts_with(['{', '[']);
+    // `Be2's` and `c3,` clean to moves, but they're the start of a sentence.
+    let bare = !first.contains(['\'', '’', ',']);
+    (alone && bare && clean(first).parse::<shakmaty::san::SanPlus>().is_ok()).then_some(first)
+}
+
+/// The first word outside a reply's comment and markup that reads as SAN, cleaned.
+fn leading_move(reply: &str) -> Option<String> {
     let (text, _) = split_commands(reply);
     let mut outside = String::with_capacity(text.len());
     let mut depth = 0usize;
@@ -76,13 +112,22 @@ pub fn attempted(reply: &str) -> Option<San> {
     }
     outside
         .split_whitespace()
-        .find_map(|word| clean(word).parse::<shakmaty::san::SanPlus>().ok())
-        .map(|san| san.san)
+        .map(clean)
+        .find(|word| word.parse::<shakmaty::san::SanPlus>().is_ok())
+        .map(Cow::into_owned)
 }
 
 /// The first legal move in a reply, and the reply's markings. Whatever isn't the move
 /// counts as the comment, unless it's in the way of nothing but the move.
 pub fn parse(reply: &str, position: &Chess) -> Option<(Move, Annotations)> {
+    // A reply in the asked-for shape, a move and then its comment, chose that move. If it's
+    // illegal, a legal one named in the comment would be played on a board it misread: the
+    // retry puts that right. Prose first is read leniently: it often names the player's move.
+    if let Some(chosen) = opening_move(reply)
+        && parse_move(chosen, position).is_none()
+    {
+        return None;
+    }
     let reply = &spoken_next(reply);
     let (text, commands) = split_commands(reply);
     let found = text
@@ -137,6 +182,26 @@ fn spoken_next(reply: &str) -> Cow<'_, str> {
     }
     spoken.push_str(rest);
     Cow::Owned(spoken)
+}
+
+/// The move a reply names with `[%next]` that the player can't play once the agent has played
+/// `played` in `position`: dropped silently, it left a lesson's comment telling them to play
+/// a move they had no arrow for. `None` if it names none, or one they can play, or if it
+/// names the agent's own move, put where theirs goes, which [`parse`] reads as that.
+pub fn unplayable_next(reply: &str, position: &Chess, played: Move) -> Option<String> {
+    let (text, commands) = split_commands(reply);
+    let (_, named) = commands.iter().find(|(name, _)| *name == NEXT)?;
+    let named = named.trim();
+    let moved_outside = text
+        .split_whitespace()
+        .any(|word| parse_move(word, position).is_some());
+    if !moved_outside && parse_move(named, position) == Some(played) {
+        return None;
+    }
+    let mut after = position.clone();
+    after.play_unchecked(played);
+    let open = !after.legal_moves().is_empty();
+    (open && parse_move(named, &after).is_none()).then(|| named.to_owned())
 }
 
 /// Draws the player's next move, if the reply names one that's legal in `position`.
@@ -456,6 +521,82 @@ mod tests {
         // Black's pawn can't reach e4, and the words around it are no moves either.
         assert!(parse("e4", &after(&["e4"]).position()).is_none());
         assert!(parse("I resign", &Chess::default()).is_none());
+    }
+
+    #[test]
+    fn a_legal_move_in_the_comment_never_stands_in_for_an_illegal_one() {
+        let position = after(&["e4", "e5"]).position();
+        // No knight reaches e5: the Nf3 it talks about isn't the move it chose.
+        assert!(parse("Nxe5 {Or Nf3, calmer.}", &position).is_none());
+        assert!(parse("**Nxe5** {Or Nf3.}", &position).is_none());
+        // The square it says the piece comes from is part of the move it chose.
+        assert!(parse("Nb1f3", &position).is_none());
+        let (played, _) = parse("Ng1f3 {Developing.}", &position).unwrap();
+        assert_eq!(played.to(), Square::F3);
+    }
+
+    #[test]
+    fn a_reply_that_opens_with_the_players_move_still_plays_its_own() {
+        // GLM 5.3 Flash, Black, after 1. e4 c5 2. Nf3 d6 3. Be2: prose first, naming the
+        // player's move, its own move last. Read as its move, Be2 went to the retry.
+        let position = after(&["e4", "c5", "Nf3", "d6", "Be2"]).position();
+        for reply in [
+            "Be2's fine, but the sharper move was d4. I'll take it: Nf6. [%csl Gf6]",
+            "Be2, solid. Nf6 [%csl Gf6]",
+        ] {
+            let (played, _) = parse(reply, &position).unwrap();
+            assert_eq!(played.to(), Square::F6, "{reply}");
+        }
+    }
+
+    #[test]
+    fn finds_a_next_move_the_player_cant_play() {
+        let position = after(&["e4"]).position();
+        let check = |reply: &str| {
+            let (played, _) = parse(reply, &position).unwrap();
+            unplayable_next(reply, &position, played)
+        };
+        // Its own move as the player's, as GLM 5.3 Flash wrote it a whole lesson long.
+        assert_eq!(
+            check("c5 {The Sicilian!} [%next c5]").as_deref(),
+            Some("c5")
+        );
+        assert_eq!(check("c5 {Now Nc3.} [%next Nc5]").as_deref(), Some("Nc5"));
+        assert_eq!(check("c5 {Now Nf3.} [%next Nf3]"), None);
+        assert_eq!(check("c5 {Your move.}"), None);
+        // Its own move put where the player's goes is read as its move, not as theirs.
+        assert_eq!(check("{I'll answer in the center.} [%next e5]"), None);
+    }
+
+    #[test]
+    fn reads_moves_written_as_the_turns_write_them() {
+        // Told its moves as `Bf8-g7`, DeepSeek V4.1 Flash answered that way, and the reply
+        // read as no move at all, twice, which ended the game.
+        let position = after(&["e4", "e5"]).position();
+        for (reply, to) in [
+            ("Ng1-f3 {Developing.}", Square::F3),
+            ("**Bf1-c4**", Square::C4),
+            ("d2-d4", Square::D4),
+            ("Qd1-h5+", Square::H5),
+        ] {
+            let (played, said) = parse(reply, &position).unwrap();
+            assert_eq!(played.to(), to, "{reply}");
+            assert!(!said.text.contains('-'), "{reply}: {}", said.text);
+        }
+        let capture = after(&["e4", "d5"]).position();
+        assert!(parse("e4xd5", &capture).is_some());
+        let promotion = Game::parse_fen("8/P6k/8/8/8/8/8/K7 w - - 0 1").unwrap();
+        assert!(
+            parse("a7-a8=Q", &promotion)
+                .unwrap()
+                .0
+                .promotion()
+                .is_some()
+        );
+        // A piece it thinks stands where it doesn't is an illegal try, with the reason.
+        assert!(parse("Nb1-e2", &position).is_none());
+        assert_eq!(attempted("Nb1-e2 {Hmm}"), Some("Nb1e2".parse().unwrap()));
+        assert!(parse("Bf1-e2 {Retreat}", &position).is_some());
     }
 
     #[test]

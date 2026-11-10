@@ -88,7 +88,7 @@ debug build: a release build on Windows has no console to print to.
 
 One command per line; `#` starts a comment, and paths are relative to the script. Each command
 first waits until the game on show has settled: no opponent or agent at work, no evaluation or
-analysis running, no pieces moving, and no agent being asked for its models.
+analysis running, no pieces moving, and no agent being asked for its models or efforts.
 
 | Command | Does |
 |---|---|

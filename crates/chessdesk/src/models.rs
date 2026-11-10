@@ -1,6 +1,7 @@
-//! The models each agent offers. An agent says so only when a session starts, which takes a
-//! few seconds but no tokens, so the answers are kept on disk: a list shows at once, and one
-//! older than a day is asked for again in the background.
+//! The models each agent offers, and the efforts each model offers. An agent says so only
+//! when a session starts, which takes a few seconds but no tokens, so the answers are kept
+//! on disk: a list shows at once, and one older than a day is asked for again in the
+//! background.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -9,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chessdesk_players::acp::{self, AgentConfig, AgentKind, Effort, Models};
 use gpui::{AppContext, Context, SharedString};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::{tr, tr_with};
@@ -30,30 +32,48 @@ struct Saved {
 /// The saved answers, by the agent's name.
 type SavedModels = BTreeMap<String, Saved>;
 
+/// A model's efforts as kept on disk.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct SavedEfforts {
+    asked: u64,
+    efforts: Vec<Effort>,
+}
+
+/// The saved efforts, by the agent's name, then the model's id: [`DEFAULT_MODEL`] for the
+/// agent's own default.
+type SavedEffortsByModel = BTreeMap<String, BTreeMap<String, SavedEfforts>>;
+
+/// How the agent's default model is kept: under its own name it could be another tomorrow,
+/// and Claude Code lists a model named `default` of its own.
+const DEFAULT_MODEL: &str = "";
+
+const MODELS_FILE: &str = "models.toml";
+const EFFORTS_FILE: &str = "efforts.toml";
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
 }
 
-fn is_fresh(saved: &Saved, now: u64) -> bool {
-    now.saturating_sub(saved.asked) < FRESH_FOR.as_secs()
+fn is_fresh(asked: u64, now: u64) -> bool {
+    now.saturating_sub(asked) < FRESH_FOR.as_secs()
 }
 
-fn cache_path() -> Option<PathBuf> {
-    Some(Settings::data_dir()?.join("models.toml"))
+fn cache_path(file: &str) -> Option<PathBuf> {
+    Some(Settings::data_dir()?.join(file))
 }
 
 /// What's kept, or nothing if there's none or it doesn't read: it's only a cache.
-fn load_saved() -> SavedModels {
-    cache_path()
+fn load_saved<T: DeserializeOwned + Default>(file: &str) -> T {
+    cache_path(file)
         .and_then(|path| fs::read_to_string(path).ok())
         .and_then(|text| toml::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-fn store_saved(saved: &SavedModels) -> Result<(), String> {
-    let path = cache_path().ok_or("no data folder on this system")?;
+fn store_saved(file: &str, saved: &impl Serialize) -> Result<(), String> {
+    let path = cache_path(file).ok_or("no data folder on this system")?;
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder).map_err(|error| error.to_string())?;
     }
@@ -106,9 +126,36 @@ pub enum Offer {
     Failed(String),
 }
 
+/// What's known of the efforts one model offers.
+#[derive(Clone, Debug)]
+enum EffortOffer {
+    Asking,
+    Known(Vec<Effort>),
+}
+
+/// A model of an agent, its id empty for the agent's default.
+type ModelKey = (AgentKind, String);
+
+fn model_key(kind: AgentKind, model: Option<&str>) -> ModelKey {
+    (kind, model.unwrap_or(DEFAULT_MODEL).to_owned())
+}
+
+/// What a list is asked for with: the model, and nothing that costs.
+fn asking_config(kind: AgentKind, model: Option<&str>) -> AgentConfig {
+    AgentConfig {
+        kind,
+        model: model.map(str::to_owned),
+        effort: Effort::Low,
+        adapters: Settings::adapters_dir().unwrap_or_default(),
+        reply_language: None,
+    }
+}
+
 pub struct Catalog {
     offers: HashMap<AgentKind, Offer>,
     saved: SavedModels,
+    efforts: HashMap<ModelKey, EffortOffer>,
+    saved_efforts: SavedEffortsByModel,
 }
 
 impl Catalog {
@@ -116,7 +163,9 @@ impl Catalog {
     pub fn load() -> Self {
         Self {
             offers: HashMap::new(),
-            saved: load_saved(),
+            saved: load_saved(MODELS_FILE),
+            efforts: HashMap::new(),
+            saved_efforts: load_saved(EFFORTS_FILE),
         }
     }
 
@@ -142,10 +191,90 @@ impl Catalog {
 
     /// What's being asked, for the title bar.
     pub fn activity(&self) -> Option<Activity> {
-        self.offers
+        let models = self
+            .offers
             .iter()
             .find(|(_, offer)| matches!(offer, Offer::Asking))
-            .map(|(kind, _)| Activity::new(tr_with!("activity-asking-models", agent = kind.name())))
+            .map(|(kind, _)| tr_with!("activity-asking-models", agent = kind.name()));
+        let efforts = || {
+            self.efforts
+                .iter()
+                .find(|(_, offer)| matches!(offer, EffortOffer::Asking))
+                .map(|((kind, _), _)| tr_with!("activity-asking-efforts", agent = kind.name()))
+        };
+        models.or_else(efforts).map(Activity::new)
+    }
+
+    /// The efforts `model` of `kind` offers, `None` for its default, once known. Empty if
+    /// it has no choice.
+    pub fn efforts(&self, kind: AgentKind, model: Option<&str>) -> Option<&[Effort]> {
+        match self.efforts.get(&model_key(kind, model))? {
+            EffortOffer::Known(efforts) => Some(efforts),
+            EffortOffer::Asking => None,
+        }
+    }
+
+    /// Asks `kind` which efforts `model` offers, as [`ask`](Self::ask) does for models.
+    pub fn ask_efforts(&mut self, kind: AgentKind, model: Option<&str>, cx: &mut Context<Self>) {
+        let key = model_key(kind, model);
+        if self.efforts.contains_key(&key) {
+            return;
+        }
+        let saved = self
+            .saved_efforts
+            .get(kind.name())
+            .and_then(|models| models.get(&key.1))
+            .cloned();
+        let quiet = saved.is_some();
+        match saved {
+            Some(saved) => {
+                self.efforts
+                    .insert(key.clone(), EffortOffer::Known(saved.efforts));
+                if is_fresh(saved.asked, now()) {
+                    return;
+                }
+            }
+            None => {
+                self.efforts.insert(key.clone(), EffortOffer::Asking);
+            }
+        }
+        cx.notify();
+        let config = asking_config(kind, model);
+        cx.spawn(async move |this, cx| {
+            let answer = cx
+                .background_spawn(async move { acp::efforts(&config) })
+                .await;
+            this.update(cx, |this, cx| {
+                match answer {
+                    Ok(efforts) => this.remember_efforts(key, efforts),
+                    Err(_) if quiet => {}
+                    // Every level, as before they were asked for: a game started with one
+                    // the model lacks gets the nearest it has. Asked again next run.
+                    Err(_) => {
+                        this.efforts
+                            .insert(key, EffortOffer::Known(Effort::ALL.to_vec()));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn remember_efforts(&mut self, (kind, model): ModelKey, efforts: Vec<Effort>) {
+        let saved = SavedEfforts {
+            asked: now(),
+            efforts: efforts.clone(),
+        };
+        self.saved_efforts
+            .entry(kind.name().to_owned())
+            .or_default()
+            .insert(model.clone(), saved);
+        self.efforts
+            .insert((kind, model), EffortOffer::Known(efforts));
+        // Not worth a word if it fails: the efforts are asked for again next time.
+        let _ = store_saved(EFFORTS_FILE, &self.saved_efforts);
     }
 
     /// Asks `kind` for its models, unless that's known or under way. A saved list shows at
@@ -163,7 +292,7 @@ impl Catalog {
         match saved {
             Some(saved) => {
                 self.offers.insert(kind, Offer::Known(saved.models.clone()));
-                if is_fresh(&saved, now()) {
+                if is_fresh(saved.asked, now()) {
                     return;
                 }
             }
@@ -172,13 +301,7 @@ impl Catalog {
             }
         }
         cx.notify();
-        let config = AgentConfig {
-            kind,
-            model: None,
-            effort: Effort::Low,
-            adapters: Settings::adapters_dir().unwrap_or_default(),
-            reply_language: None,
-        };
+        let config = asking_config(kind, None);
         cx.spawn(async move |this, cx| {
             let answer = cx
                 .background_spawn(async move { acp::models(&config) })
@@ -207,7 +330,7 @@ impl Catalog {
         };
         self.saved.insert(kind.name().to_owned(), saved);
         // Not worth a word if it fails: the list is asked for again next time.
-        let _ = store_saved(&self.saved);
+        let _ = store_saved(MODELS_FILE, &self.saved);
     }
 }
 
@@ -216,6 +339,31 @@ mod tests {
     use chessdesk_players::acp::Model;
 
     use super::*;
+
+    #[test]
+    fn saved_efforts_read_back_with_the_default_under_an_empty_id() {
+        let saved = SavedEffortsByModel::from([(
+            "Pi".to_owned(),
+            BTreeMap::from([
+                (
+                    DEFAULT_MODEL.to_owned(),
+                    SavedEfforts {
+                        asked: 7,
+                        efforts: Effort::ALL.to_vec(),
+                    },
+                ),
+                (
+                    "openrouter/z-ai/glm-5.3-flash".to_owned(),
+                    SavedEfforts {
+                        asked: 9,
+                        efforts: vec![Effort::Low, Effort::High],
+                    },
+                ),
+            ]),
+        )]);
+        let text = toml::to_string(&saved).unwrap();
+        assert_eq!(toml::from_str::<SavedEffortsByModel>(&text).unwrap(), saved);
+    }
 
     #[test]
     fn saved_models_read_back() {
@@ -272,7 +420,7 @@ mod tests {
             asked: 1_000_000,
             models: None,
         };
-        assert!(is_fresh(&saved, 1_000_000 + 60));
-        assert!(!is_fresh(&saved, 1_000_000 + FRESH_FOR.as_secs()));
+        assert!(is_fresh(saved.asked, 1_000_000 + 60));
+        assert!(!is_fresh(saved.asked, 1_000_000 + FRESH_FOR.as_secs()));
     }
 }

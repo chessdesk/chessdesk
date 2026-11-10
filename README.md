@@ -99,7 +99,8 @@ has used so far.
 If an agent can't come up with a legal move, it gets one more try with the legal moves spelled out.
 After that the game pauses and you decide. Chessdesk never makes up a move for it. The same goes for
 an agent that takes too long: 3 minutes on low effort, 8 on medium and 20 on high. You can change the
-effort during a game, from the agent's next move on.
+effort during a game, from the agent's next move on. Only the efforts the model offers are listed,
+and none for a model without a choice.
 
 ## Keys
 

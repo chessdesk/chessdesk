@@ -14,9 +14,9 @@ use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionConfigKind, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption,
-    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SystemPrompt, SystemPromptMode, TextContent,
+    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelect,
+    SessionConfigSelectOption, SessionConfigSelectOptions, SessionId, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SystemPrompt, SystemPromptMode, TextContent,
 };
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use chessdesk_core::{Annotations, Game};
@@ -29,7 +29,7 @@ use shakmaty::{Color, Position};
 use crate::{Decision, Intro, Opponent, PlayerError, Tokens, adapters, pi, prompt, reply};
 
 /// How hard an agent thinks about a move. More effort plays better and costs more.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Effort {
     #[default]
     Low,
@@ -57,6 +57,19 @@ impl Effort {
             Self::Medium => "medium",
             Self::High => "high",
         }
+    }
+
+    fn from_level(level: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|effort| effort.level() == level)
+    }
+
+    /// The one of `offered` closest to this, the lower of two as close: it answers sooner
+    /// and costs less. `None` if nothing is offered.
+    pub fn nearest(self, offered: &[Self]) -> Option<Self> {
+        offered
+            .iter()
+            .copied()
+            .min_by_key(|effort| ((*effort as u8).abs_diff(self as u8), *effort))
     }
 }
 
@@ -151,6 +164,12 @@ impl AgentKind {
     /// Measured: Copilot's grows by a full context each turn, Claude's doesn't.
     fn reports_running_total(self) -> bool {
         self == Self::Copilot
+    }
+
+    /// Whether the agent is told its effort when it starts, not as a session setting, so
+    /// that it may take every level without listing any.
+    fn effort_from_start(self) -> bool {
+        matches!(self, Self::Codex | Self::Copilot)
     }
 
     /// Settings only this agent's adapter understands. For Claude, an empty list of each
@@ -379,8 +398,35 @@ pub fn models(config: &AgentConfig) -> Result<Option<Models>, PlayerError> {
             choices: Vec::new(),
         }));
     }
+    let options = session_options(&AgentConfig {
+        model: None,
+        ..config.clone()
+    })?;
+    Ok(Models::from_options(&options))
+}
+
+/// The efforts `config`'s agent offers with its model, as it says once switched to it:
+/// models differ, and some have no choice at all. Spends no tokens.
+pub fn efforts(config: &AgentConfig) -> Result<Vec<Effort>, PlayerError> {
+    if config.kind == AgentKind::Copilot {
+        // It takes its model and effort only when it starts, and lists neither.
+        return Ok(Effort::ALL.to_vec());
+    }
+    let options = session_options(config)?;
+    Ok(offered_efforts(&options).unwrap_or_else(|| {
+        if config.kind.effort_from_start() {
+            Effort::ALL.to_vec()
+        } else {
+            Vec::new()
+        }
+    }))
+}
+
+/// The settings of a new session, switched to `config`'s model if it names one.
+fn session_options(config: &AgentConfig) -> Result<Vec<SessionConfigOption>, PlayerError> {
     let process = |error: agent_client_protocol::Error| PlayerError::Process(error.to_string());
     let agent = self::process(config, "").map_err(process)?;
+    let model = config.model.clone();
     futures::executor::block_on(Client.v1().connect_with(
         agent,
         async move |connection: ConnectionTo<Agent>| {
@@ -392,10 +438,23 @@ pub fn models(config: &AgentConfig) -> Result<Option<Models>, PlayerError> {
                 .send_request(NewSessionRequest::new(empty_folder()?))
                 .block_task()
                 .await?;
-            Ok(session
-                .config_options
+            let options = session.config_options.unwrap_or_default();
+            let offered = Models::from_options(&options);
+            let Some((option, value)) = model
                 .as_deref()
-                .and_then(Models::from_options))
+                .and_then(|model| model_change(offered.as_ref()?, model))
+            else {
+                return Ok(options);
+            };
+            Ok(connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    session.session_id,
+                    option,
+                    SessionConfigOptionValue::value_id(value),
+                ))
+                .block_task()
+                .await?
+                .config_options)
         },
     ))
     .map_err(process)
@@ -522,21 +581,38 @@ fn model_change(offered: &Models, model: &str) -> Option<(String, String)> {
 /// offers that as a session setting with the same level: Pi does, and started on its own
 /// default, which was `high`.
 fn effort_change(options: &[SessionConfigOption], effort: Effort) -> Option<(String, String)> {
+    let (option, select) = thought_level(options)?;
+    let level = effort.nearest(&offered_efforts(options)?)?.level();
+    (select.current_value.to_string() != level).then(|| (option.id.to_string(), level.to_owned()))
+}
+
+/// The session setting for how hard the agent thinks, if it has one.
+fn thought_level(
+    options: &[SessionConfigOption],
+) -> Option<(&SessionConfigOption, &SessionConfigSelect)> {
     let option = options
         .iter()
         .find(|option| option.category == Some(SessionConfigOptionCategory::ThoughtLevel))?;
     let SessionConfigKind::Select(select) = &option.kind else {
         return None;
     };
+    Some((option, select))
+}
+
+/// Chessdesk's efforts among a session's levels, or `None` if it has no such setting.
+/// Others, such as `max` or `off`, aren't offered: three steps cover what a game needs.
+fn offered_efforts(options: &[SessionConfigOption]) -> Option<Vec<Effort>> {
+    let (_, select) = thought_level(options)?;
     let SessionConfigSelectOptions::Ungrouped(levels) = &select.options else {
         return None;
     };
-    let level = effort.level();
-    let offered = levels
+    let mut efforts: Vec<_> = levels
         .iter()
-        .any(|choice| choice.value.to_string() == level);
-    (offered && select.current_value.to_string() != level)
-        .then(|| (option.id.to_string(), level.to_owned()))
+        .filter_map(|choice| Effort::from_level(&choice.value.to_string()))
+        .collect();
+    efforts.sort_unstable();
+    efforts.dedup();
+    Some(efforts)
 }
 
 /// What a turn added to a running total.
@@ -609,29 +685,61 @@ fn add_tokens(total: &mut Option<Tokens>, more: Option<Tokens>) {
 }
 
 /// Reads a move from the session's reply to `text`, and if there's none, asks once more with
-/// the legal moves listed and why the move it tried can't be played.
+/// the legal moves listed and why the move it tried can't be played. If its move is fine but
+/// the player's next move it named can't be played, it's asked once more for the whole reply.
 fn ask_for_move(
     session: &Session,
     text: String,
     position: &shakmaty::Chess,
 ) -> Result<Decision, PlayerError> {
+    let (mut decision, first) = ask_for_legal_move(session, text, position)?;
+    // One retry a turn at most: after one for its move, an unplayable next move is dropped.
+    let Some(named) =
+        first.and_then(|said| reply::unplayable_next(&said, position, decision.played))
+    else {
+        return Ok(decision);
+    };
+    let mut after = position.clone();
+    after.play_unchecked(decision.played);
+    let (again, more) = session.ask(prompt::next_retry(&after, &named))?;
+    add_tokens(&mut decision.tokens, more);
+    // The second reply stands if it has a legal move, its next move drawn only if playable.
+    // Without one, the first stands without its next move, as before.
+    if let Some((played, annotations)) = reply::parse(&again, position) {
+        decision.played = played;
+        decision.annotations = annotations;
+    }
+    Ok(decision)
+}
+
+/// [`ask_for_move`]'s first part: a legal move, retried once, and the reply it came in if
+/// that was the first.
+fn ask_for_legal_move(
+    session: &Session,
+    text: String,
+    position: &shakmaty::Chess,
+) -> Result<(Decision, Option<String>), PlayerError> {
     let (first, mut tokens) = session.ask(text)?;
     if let Some((played, annotations)) = reply::parse(&first, position) {
-        return Ok(Decision {
+        let decision = Decision {
             played,
             annotations,
             tokens,
-        });
+        };
+        return Ok((decision, Some(first)));
     }
     let attempted = reply::attempted(&first);
     let (second, more) = session.ask(prompt::retry(position, attempted))?;
     add_tokens(&mut tokens, more);
     match reply::parse(&second, position) {
-        Some((played, annotations)) => Ok(Decision {
-            played,
-            annotations,
-            tokens,
-        }),
+        Some((played, annotations)) => Ok((
+            Decision {
+                played,
+                annotations,
+                tokens,
+            },
+            None,
+        )),
         // Twice nothing: Pi's adapter ends a turn the provider refused, for a bad key or an
         // empty quota, with no words and no error, and a model can think a turn away.
         None if second.trim().is_empty() => Err(PlayerError::Process(
@@ -761,22 +869,53 @@ mod tests {
         assert!(Models::from_options(&offered()[..1]).is_none());
     }
 
+    fn thinking(current: &str, levels: &[&'static str]) -> SessionConfigOption {
+        let levels = levels
+            .iter()
+            .map(|level| SessionConfigSelectOption::new(*level, *level))
+            .collect::<Vec<_>>();
+        SessionConfigOption::select("thought_level", "Thinking", current.to_owned(), levels)
+            .category(SessionConfigOptionCategory::ThoughtLevel)
+    }
+
     #[test]
     fn effort_is_set_where_the_agent_offers_that_level() {
-        let thinking = |current| {
-            let levels = ["off", "low", "medium", "high"]
-                .map(|level| SessionConfigSelectOption::new(level, level))
-                .to_vec();
-            SessionConfigOption::select("thought_level", "Thinking", current, levels)
-                .category(SessionConfigOptionCategory::ThoughtLevel)
-        };
+        let levels = ["off", "low", "medium", "high"];
         assert_eq!(
-            effort_change(&[thinking("high")], Effort::Low),
+            effort_change(&[thinking("high", &levels)], Effort::Low),
             Some(("thought_level".to_owned(), "low".to_owned()))
         );
-        assert_eq!(effort_change(&[thinking("low")], Effort::Low), None);
+        assert_eq!(
+            effort_change(&[thinking("low", &levels)], Effort::Low),
+            None
+        );
         // No such setting: the effort goes some other way, or not at all.
         assert_eq!(effort_change(&offered(), Effort::Low), None);
+    }
+
+    #[test]
+    fn a_level_the_model_lacks_becomes_the_nearest_it_has() {
+        // GLM 5.3 Flash in Pi: no medium, and the session starts on high.
+        let glm = [thinking("high", &["off", "low", "high", "max"])];
+        assert_eq!(offered_efforts(&glm), Some(vec![Effort::Low, Effort::High]));
+        assert_eq!(
+            effort_change(&glm, Effort::Medium),
+            Some(("thought_level".to_owned(), "low".to_owned()))
+        );
+        let none = [thinking("max", &["max", "default"])];
+        assert_eq!(offered_efforts(&none), Some(Vec::new()));
+        assert_eq!(effort_change(&none, Effort::Low), None);
+        assert_eq!(offered_efforts(&offered()), None);
+    }
+
+    #[test]
+    fn the_nearest_effort_is_the_lower_of_two_as_close() {
+        use Effort::{High, Low, Medium};
+        assert_eq!(Medium.nearest(&[Low, High]), Some(Low));
+        assert_eq!(Low.nearest(&[Medium, High]), Some(Medium));
+        assert_eq!(High.nearest(&[Low]), Some(Low));
+        assert_eq!(Medium.nearest(&Effort::ALL), Some(Medium));
+        assert_eq!(Medium.nearest(&[]), None);
     }
 
     #[test]
