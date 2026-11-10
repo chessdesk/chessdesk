@@ -97,10 +97,7 @@ fn main() {
     }
 
     while game.outcome().is_unknown() && game.moves().len() < max_plies {
-        if game.position().turn() != side {
-            let lesson = if follow { drawn.as_slice() } else { &[] };
-            players_turn(&mut game, &mut stand_in, &mut grader, lesson);
-        } else {
+        if game.position().turn() == side {
             match agents_turn(&mut game, &mut agent, &instructions) {
                 Ok(said) => {
                     add(&mut spent, said.tokens);
@@ -112,6 +109,9 @@ fn main() {
                     break;
                 }
             }
+        } else {
+            let lesson = if follow { drawn.as_slice() } else { &[] };
+            players_turn(&mut game, &mut stand_in, &mut grader, lesson);
         }
     }
 
