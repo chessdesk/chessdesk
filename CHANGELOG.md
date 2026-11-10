@@ -3,14 +3,7 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
-## 2.8.0 - 2026-11-09
-
-### Added
-
-- Pick the model each agent reviews games and gives hints with, under Settings, Agents. Until now
-  they used whatever the agent's own default was, which could be any model. Claude Code starts on
-  Sonnet
-- The welcome asks for those models in a third step, once an agent is set up
+## 2.8.1 - 2026-11-10
 
 ### Fixed
 
@@ -31,6 +24,20 @@ minor versions bring features, patch versions only fixes.
   turns now spell them. A model that copied that ended up with no move read, and the game paused
 - A move two of the agent's pieces can make, such as Rd8 with rooks on a8 and e8, is retried
   with both named and how to write each. The agent was told its rook was pinned, which it wasn't
+
+### Changed
+
+- Each release archive is published once, named x64 or arm64. The copies named x86_64 and
+  aarch64, kept for updaters before 2.3.0, are gone
+
+## 2.8.0 - 2026-11-09
+
+### Added
+
+- Pick the model each agent reviews games and gives hints with, under Settings, Agents. Until now
+  they used whatever the agent's own default was, which could be any model. Claude Code starts on
+  Sonnet
+- The welcome asks for those models in a third step, once an agent is set up
 
 ## 2.7.1 - 2026-11-09
 
