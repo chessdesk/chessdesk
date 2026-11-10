@@ -199,11 +199,5 @@ jobs:
             echo "v$version is out already."
             exit 0
           fi
-          # Under the names before 2.3.0 too, which those versions' updaters look for.
-          for os_ext in windows:zip linux:tar.gz; do
-            os=${os_ext%%:*} ext=${os_ext#*:}
-            cp "chessdesk-$os-x64.$ext" "chessdesk-$os-x86_64.$ext"
-            cp "chessdesk-$os-arm64.$ext" "chessdesk-$os-aarch64.$ext"
-          done
           gh release create "v$version" --target "$GITHUB_SHA" --title "Chessdesk $version" \
             --generate-notes chessdesk-*.zip chessdesk-*.tar.gz
