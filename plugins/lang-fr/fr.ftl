@@ -74,6 +74,7 @@ activity-analyzing = Analyse avec Stockfish, coup { $done } sur { $all }
 activity-downloading = Téléchargement de { $name }, { $percent } %
 activity-installing = Installation de l'adaptateur { $agent }
 activity-asking-models = { $agent } est interrogé sur ses modèles
+activity-asking-efforts = { $agent } est interrogé sur l'effort de réflexion de ses modèles
 
 ## Game history
 
@@ -151,6 +152,7 @@ analysis-models-hint = Ce que chaque agent utilise quand vous appuyez sur Analys
 welcome-models = Modèles pour les analyses et les indices
 welcome-models-intro = Le modèle que chaque agent utilise quand vous appuyez sur Analyser ou lui demandez un indice. Vous pouvez le changer dans Réglages, Agents.
 models-asking = Recherche des modèles…
+efforts-asking = Recherche des niveaux…
 models-unknown = Impossible de connaître ses modèles : { $error }
 reasoning-effort = Effort de réflexion
 effort-value = { $effort }. Plus il est élevé, plus il coûte de jetons

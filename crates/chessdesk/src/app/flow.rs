@@ -197,6 +197,7 @@ impl Chessdesk {
         self.active = id;
         self.settings_page = None;
         self.attach_instructions(id, cx);
+        self.ask_for_efforts(id, cx);
         self.attach_notes(id, cx);
         self.run_clocks(cx);
         self.after_change(id, cx);
@@ -243,6 +244,23 @@ impl Chessdesk {
             this.on_instructions(id, text, cx);
         });
         live.instructions = Some((area, changes));
+    }
+
+    /// Asks which efforts the model of a game against an agent offers, for its select.
+    fn ask_for_efforts(&mut self, id: SessionId, cx: &mut Context<Self>) {
+        let Some(setup) = self
+            .session_mut(id)
+            .and_then(|session| session.live.as_ref())
+            .map(|live| live.setup.clone())
+        else {
+            return;
+        };
+        let Some(kind) = setup.opponent.agent() else {
+            return;
+        };
+        self.catalog.0.update(cx, |catalog, cx| {
+            catalog.ask_efforts(kind, setup.model.as_deref(), cx);
+        });
     }
 
     /// Keeps new instructions for the agent's next turn, and for picking the game up later.
@@ -1268,6 +1286,7 @@ impl Chessdesk {
         self.attach_notes(id, cx);
         if resumed {
             self.attach_instructions(id, cx);
+            self.ask_for_efforts(id, cx);
             self.run_clocks(cx);
             self.after_change(id, cx);
         }

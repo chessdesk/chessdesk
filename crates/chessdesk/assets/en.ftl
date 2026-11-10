@@ -78,6 +78,7 @@ activity-analyzing = Analyzing with Stockfish, move { $done } of { $all }
 activity-downloading = Downloading { $name }, { $percent }%
 activity-installing = Installing the { $agent } adapter
 activity-asking-models = Asking { $agent } for its models
+activity-asking-efforts = Asking { $agent } for its efforts
 
 ## Game history
 
@@ -153,6 +154,7 @@ model-agent-default = The agent's default
 analysis-models = Models for reviews and hints
 analysis-models-hint = What each agent uses when you press Analyze or ask it for a hint.
 models-asking = Asking for models…
+efforts-asking = Asking for efforts…
 models-unknown = Could not ask for its models: { $error }
 reasoning-effort = Reasoning effort
 effort-value = { $effort }. Higher costs more tokens

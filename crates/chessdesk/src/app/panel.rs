@@ -45,7 +45,7 @@ use crate::i18n::{tr, tr_with};
 use crate::installs::{self, NeedsStockfish};
 use crate::library::{self, Standing, standing};
 use crate::settings::{Settings, side_name};
-use crate::setup::{OpponentKind, effort_label};
+use crate::setup::{OpponentKind, Setup, effort_label};
 use crate::ui::{self, Icon, Logo, Transition};
 
 const LIKELIHOOD_BAR_HEIGHT: Pixels = px(20.);
@@ -728,58 +728,86 @@ impl Chessdesk {
         Some(div().flex_none().h(shown).overflow_hidden().child(body))
     }
 
-    /// How hard the agent thinks, to change during the game: a select beside its label. It
-    /// applies from the agent's next move.
-    fn render_effort(&self, current: Effort, window: &Window, cx: &mut Context<Self>) -> Div {
+    /// How hard the agent thinks, to change during the game: a select beside its label, of
+    /// the efforts its model offers. It applies from the agent's next move. `None` for a
+    /// model without a choice.
+    fn render_effort(&self, setup: &Setup, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
         let settings = Settings::get(cx);
+        let kind = setup.opponent.agent()?;
+        let efforts = self
+            .catalog
+            .0
+            .read(cx)
+            .efforts(kind, setup.model.as_deref())
+            .map(<[Effort]>::to_vec);
         let open = self.effort_menu;
-        let button = ui::select_button("effort", effort_label(current), None, open, &settings)
-            .w(EFFORT_SELECT_WIDTH)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                    this.effort_menu = !open;
+        let (button, list) = if let Some(efforts) = efforts {
+            let current = setup.effort.nearest(&efforts)?;
+            let button = ui::select_button("effort", effort_label(current), None, open, &settings)
+                .w(EFFORT_SELECT_WIDTH)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                        this.effort_menu = !open;
+                        cx.notify();
+                    }),
+                );
+            let list = open.then(|| Self::render_effort_list(&efforts, current, window, cx));
+            (button, list)
+        } else {
+            let asking = ui::select_button("effort", tr("efforts-asking"), None, false, &settings)
+                .w(EFFORT_SELECT_WIDTH)
+                .cursor_default();
+            (asking, None)
+        };
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .pt_2()
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(settings.colors.muted)
+                        .child(tr("reasoning-effort")),
+                )
+                .child(div().flex_none().child(button).children(list)),
+        )
+    }
+
+    /// The open effort select's choices.
+    fn render_effort_list(
+        efforts: &[Effort],
+        current: Effort,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let settings = Settings::get(cx);
+        let rows = efforts.iter().copied().enumerate().map(|(index, effort)| {
+            ui::list_row(("effort-choice", index), effort == current, &settings)
+                .text_color(settings.colors.text)
+                .child(effort_label(effort))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.effort_menu = false;
+                    this.set_effort(effort, cx);
                     cx.notify();
-                }),
-            );
-        let list = open.then(|| {
-            let rows = Effort::ALL.into_iter().enumerate().map(|(index, effort)| {
-                ui::list_row(("effort-choice", index), effort == current, &settings)
-                    .text_color(settings.colors.text)
-                    .child(effort_label(effort))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.effort_menu = false;
-                        this.set_effort(effort, cx);
-                        cx.notify();
-                    }))
-            });
-            ui::select_dropdown(
-                ui::popover(window, &settings)
-                    .id("effort-list")
-                    .occlude()
-                    .w(EFFORT_SELECT_WIDTH)
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        this.effort_menu = false;
-                        cx.notify();
-                    }))
-                    .children(rows),
-            )
+                }))
         });
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .pt_2()
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(settings.colors.muted)
-                    .child(tr("reasoning-effort")),
-            )
-            .child(div().flex_none().child(button).children(list))
+        ui::select_dropdown(
+            ui::popover(window, &settings)
+                .id("effort-list")
+                .occlude()
+                .w(EFFORT_SELECT_WIDTH)
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.effort_menu = false;
+                    cx.notify();
+                }))
+                .children(rows),
+        )
     }
 
     /// The opponent's name, with the tokens used so far on hover, and whether they're busy.
@@ -877,8 +905,7 @@ impl Chessdesk {
         let effort = session
             .live
             .as_ref()
-            .filter(|live| live.setup.opponent.agent().is_some())
-            .map(|live| self.render_effort(live.setup.effort, window, cx));
+            .and_then(|live| self.render_effort(&live.setup, window, cx));
         let said = div()
             .id("opponent-section")
             .flex()

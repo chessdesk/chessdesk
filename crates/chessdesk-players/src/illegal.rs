@@ -18,16 +18,58 @@ pub fn why(san: San, position: &Chess) -> Option<String> {
             to,
             ..
         } => {
-            let mine = position
+            let mine: Bitboard = position
                 .our(role)
                 .into_iter()
                 .filter(|from| file.is_none_or(|file| from.file() == file))
                 .filter(|from| rank.is_none_or(|rank| from.rank() == rank))
                 .collect();
-            Some(normal(position, role, mine, capture, to))
+            Some(
+                ambiguous(position, role, mine, to)
+                    .unwrap_or_else(|| normal(position, role, mine, capture, to)),
+            )
         }
         San::Castle(side) => Some(castle(position, side)),
         San::Put { .. } | San::Null => None,
+    }
+}
+
+/// Where more than one of `mine` can make the move: the SAN didn't say which. Without this,
+/// the reason fell through to a pin that wasn't there.
+fn ambiguous(position: &Chess, role: Role, mine: Bitboard, to: Square) -> Option<String> {
+    let moves: Vec<_> = position
+        .legal_moves()
+        .into_iter()
+        .filter(|played| played.role() == role && played.to() == to && !played.is_castle())
+        .filter(|played| played.from().is_some_and(|from| mine.contains(from)))
+        .collect();
+    if moves.len() < 2 {
+        return None;
+    }
+    let froms: Vec<_> = moves
+        .iter()
+        .filter_map(|played| played.from().map(|from| from.to_string()))
+        .collect();
+    let written: Vec<_> = moves
+        .iter()
+        .map(|played| San::from_move(position, *played).to_string())
+        .collect();
+    let both = if moves.len() == 2 { "both" } else { "all" };
+    Some(format!(
+        "your {}s on {} {both} reach {to}: write {}",
+        role_name(role),
+        listed(&froms, "and"),
+        listed(&written, "or")
+    ))
+}
+
+/// `a and b`, or `a, b and c`, with `last` as the last joining word.
+fn listed(items: &[String], last: &str) -> String {
+    match items {
+        [rest @ .., final_item] if !rest.is_empty() => {
+            format!("{} {last} {final_item}", rest.join(", "))
+        }
+        _ => items.concat(),
     }
 }
 
@@ -133,6 +175,37 @@ fn castle(position: &Chess, side: CastlingSide) -> String {
     "your king would pass through or land on an attacked square".to_owned()
 }
 
+/// [`why`] for a move the agent named for the player to play: the same reason, about them.
+pub fn why_for_the_player(san: San, position: &Chess) -> Option<String> {
+    Some(about_them(&why(san, position)?))
+}
+
+/// `reason` with the player in place of the agent: `your knight` as `their knight`.
+fn about_them(reason: &str) -> String {
+    let mut said = String::with_capacity(reason.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, said: &mut String| {
+        said.push_str(match word.as_str() {
+            "you" => "they",
+            "your" => "their",
+            "yours" => "theirs",
+            "you're" => "they're",
+            other => other,
+        });
+        word.clear();
+    };
+    for next in reason.chars() {
+        if next.is_alphabetic() || next == '\'' {
+            word.push(next);
+        } else {
+            flush(&mut word, &mut said);
+            said.push(next);
+        }
+    }
+    flush(&mut word, &mut said);
+    said
+}
+
 fn owner(color: Color, us: Color) -> &'static str {
     match (color == us, color) {
         (true, _) => "your",
@@ -141,7 +214,7 @@ fn owner(color: Color, us: Color) -> &'static str {
     }
 }
 
-fn role_name(role: Role) -> &'static str {
+pub(crate) fn role_name(role: Role) -> &'static str {
     match role {
         Role::Pawn => "pawn",
         Role::Knight => "knight",
@@ -185,6 +258,12 @@ mod tests {
             "no bishop of yours reaches d6 (your bishop: d7)"
         );
         assert_eq!(reason(AFTER_DXE5, "Qd6"), "you have no queen left");
+        // White after 9... b5 in the Sicilian lesson, sure its b3 knight takes on b5.
+        let after_b5 = "r1bq1rk1/p3bppp/2np1n2/1p2p3/4P3/1NN1B3/PPP1BPPP/R2Q1RK1 w - - 0 10";
+        assert_eq!(
+            reason(after_b5, "Nb3xb5"),
+            "no knight of yours reaches b5 (your knights: b3, c3)"
+        );
     }
 
     #[test]
@@ -194,6 +273,40 @@ mod tests {
         assert_eq!(
             reason(AFTER_BC4, "Qxa3"),
             "there is nothing to capture on a3"
+        );
+    }
+
+    #[test]
+    fn a_move_for_the_player_is_explained_about_them() {
+        let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let position = Game::parse_fen(start).unwrap();
+        let reason = |san: &str| why_for_the_player(san.parse().unwrap(), &position).unwrap();
+        assert_eq!(reason("Nd2"), "their own pawn stands on d2");
+        assert_eq!(
+            reason("Nc5"),
+            "no knight of theirs reaches c5 (their knights: b1, g1)"
+        );
+        let checked = "4k3/8/8/8/4q3/8/3P4/4K3 w - - 0 1";
+        let position = Game::parse_fen(checked).unwrap();
+        assert_eq!(
+            why_for_the_player("d3".parse().unwrap(), &position).unwrap(),
+            "they're in check from Black's queen on e4"
+        );
+    }
+
+    #[test]
+    fn a_move_two_pieces_can_make_names_both() {
+        // Rd8 with rooks on a8 and e8, as GLM 5.3 Flash wrote it twice in one game: it was
+        // told its rook on a8 was pinned, which it wasn't.
+        let two_rooks = "r3r1k1/5ppp/8/8/8/8/5PPP/6K1 b - - 0 1";
+        assert_eq!(
+            reason(two_rooks, "Rd8"),
+            "your rooks on a8 and e8 both reach d8: write Rad8 or Red8"
+        );
+        let three_knights = "6k1/8/8/1N6/8/1N3N2/8/6K1 w - - 0 1";
+        assert_eq!(
+            reason(three_knights, "Nd4"),
+            "your knights on b3, f3 and b5 all reach d4: write Nb3d4, Nfd4 or N5d4"
         );
     }
 
@@ -256,8 +369,15 @@ mod tests {
             };
             let side = if castle_short { CastlingSide::KingSide } else { CastlingSide::QueenSide };
             for san in [normal, San::Castle(side)] {
-                if san.to_move(&position).is_err() {
-                    proptest::prop_assert!(why(san, &position).is_some());
+                match san.to_move(&position) {
+                    Ok(_) => {}
+                    // A move more than one piece can make is never blamed on something else.
+                    Err(shakmaty::san::SanError::AmbiguousSan) => {
+                        let reason = why(san, &position).unwrap_or_default();
+                        proptest::prop_assert!(reason.contains(" reach "), "{reason}");
+                        proptest::prop_assert!(reason.contains(": write "), "{reason}");
+                    }
+                    Err(_) => proptest::prop_assert!(why(san, &position).is_some()),
                 }
             }
         }

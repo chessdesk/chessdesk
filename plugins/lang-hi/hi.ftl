@@ -72,6 +72,7 @@ activity-analyzing = Stockfish से विश्लेषण, चाल { $don
 activity-downloading = { $name } डाउनलोड हो रहा है, { $percent }%
 activity-installing = { $agent } एडैप्टर इंस्टॉल हो रहा है
 activity-asking-models = { $agent } से उसके मॉडल पूछे जा रहे हैं
+activity-asking-efforts = { $agent } से उसके सोचने के स्तर पूछे जा रहे हैं
 
 ## Game history
 
@@ -149,6 +150,7 @@ analysis-models-hint = जब आप विश्लेषण दबाते �
 welcome-models = समीक्षा और संकेतों के लिए मॉडल
 welcome-models-intro = वह मॉडल जो हर एजेंट विश्लेषण दबाने या संकेत माँगने पर इस्तेमाल करता है। आप इसे सेटिंग्स, एजेंट में बदल सकते हैं।
 models-asking = मॉडल पूछे जा रहे हैं…
+efforts-asking = सोचने के स्तर पूछे जा रहे हैं…
 models-unknown = इसके मॉडल पूछे नहीं जा सके: { $error }
 reasoning-effort = सोचने का स्तर
 effort-value = { $effort }। ज़्यादा स्तर पर ज़्यादा टोकन लगते हैं

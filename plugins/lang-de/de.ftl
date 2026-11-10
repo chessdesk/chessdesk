@@ -74,6 +74,7 @@ activity-analyzing = Analyse mit Stockfish, Zug { $done } von { $all }
 activity-downloading = { $name } wird heruntergeladen, { $percent } %
 activity-installing = Der Adapter für { $agent } wird installiert
 activity-asking-models = { $agent } wird nach seinen Modellen gefragt
+activity-asking-efforts = { $agent } wird nach dem Denkaufwand seiner Modelle gefragt
 
 ## Game history
 
@@ -151,6 +152,7 @@ analysis-models-hint = Was jeder Agent nutzt, wenn du Analysieren drückst oder 
 welcome-models = Modelle für Analysen und Tipps
 welcome-models-intro = Das Modell, das jeder Agent nutzt, wenn du Analysieren drückst oder ihn um einen Tipp bittest. Du kannst es unter Einstellungen, Agenten ändern.
 models-asking = Modelle werden abgefragt…
+efforts-asking = Denkaufwand wird abgefragt…
 models-unknown = Modelle nicht abrufbar: { $error }
 reasoning-effort = Denkaufwand
 effort-value = { $effort }. Mehr kostet mehr Tokens

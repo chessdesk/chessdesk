@@ -12,6 +12,26 @@ minor versions bring features, patch versions only fixes.
   Sonnet
 - The welcome asks for those models in a third step, once an agent is set up
 
+### Fixed
+
+- The reasoning effort lists only the levels the model offers, in New Game and during a game,
+  and none for a model without a choice. A level the model lacked, such as medium on GLM 5.3
+  Flash in Pi, was skipped, so the game ran on the agent's own default
+- Agents lose track of the board less: each turn tells them their own last move and yours with
+  the square each piece came from and what it took, and marks their side in the piece list.
+  Replaying a lesson where GLM 5.3 Flash moved a knight it no longer had, its first try was
+  illegal half as often. A move played for the agent because it was forced now reaches it too
+- An agent's illegal move, written first as asked, goes to the retry even when its comment
+  names a legal one, which could otherwise be played in its place
+- In a lesson, a next move the agent names that you can't play gets the agent to answer again,
+  told why. It used to be dropped, leaving a comment that told you to play a move with no
+  arrow, in up to a third of a lesson's turns
+- Coaching comments no longer mention an engine, as in "the engine agrees"
+- Agents' moves are read when written with the square they came from, such as Bf8-g7, as the
+  turns now spell them. A model that copied that ended up with no move read, and the game paused
+- A move two of the agent's pieces can make, such as Rd8 with rooks on a8 and e8, is retried
+  with both named and how to write each. The agent was told its rook was pinned, which it wasn't
+
 ## 2.7.1 - 2026-11-09
 
 ### Fixed
