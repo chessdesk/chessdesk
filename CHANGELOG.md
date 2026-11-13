@@ -3,6 +3,16 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.10.0 - 2026-11-13
+
+### Added
+
+- Shadowchess plays at every rating from 500 to 1800, in steps of 100, each as strong as real
+  players of that rating
+- Newer engines show up like a newer Chessdesk: "Update Shadowchess" in the title bar. A Chessdesk
+  update brings the engines' along, and restarts once they're in
+- The update button says what's new, and the Updates page lists everything since your version
+
 ## 2.9.0 - 2026-11-13
 
 ### Added

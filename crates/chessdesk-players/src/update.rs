@@ -9,8 +9,11 @@ use semver::Version;
 use serde::Deserialize;
 
 use crate::download::{Asset, fetch, find_program, get, unpack};
+use crate::notes::{self, Notes};
 
 const RELEASES: &str = "https://api.github.com/repos/chessdesk/chessdesk/releases/latest";
+/// The repository's files at a tag, where the changelog is read.
+const FILES: &str = "https://raw.githubusercontent.com/chessdesk/chessdesk";
 /// Where a download is unpacked: beside the program, so that moving it in is a rename on the
 /// same drive, and a folder that can't be written to shows before anything is downloaded.
 const STAGING: &str = ".chessdesk-update";
@@ -23,6 +26,9 @@ pub struct Release {
     pub version: Version,
     /// The release's page, which says what's new.
     pub page: String,
+    /// What's new since the running version, newest first; none if the changelog couldn't
+    /// be read.
+    pub notes: Vec<Notes>,
     asset: Asset,
 }
 
@@ -49,13 +55,27 @@ fn asset_name(os: &str, arch: &str) -> Option<String> {
     }
 }
 
-/// The latest release, if it's newer than `current` and built for this machine.
+/// The latest release, if it's newer than `current` and built for this machine, with what's
+/// new since `current`.
 pub fn check(current: &str) -> Result<Option<Release>, String> {
-    let body = get(RELEASES)?
+    let body = read(RELEASES)?;
+    let Some(mut release) = newer(&body, current, std::env::consts::OS, std::env::consts::ARCH)?
+    else {
+        return Ok(None);
+    };
+    let current = Version::parse(current).map_err(|error| error.to_string())?;
+    // The update is worth offering without them.
+    release.notes = read(&format!("{FILES}/v{}/CHANGELOG.md", release.version))
+        .map(|changelog| notes::since(&changelog, &current))
+        .unwrap_or_default();
+    Ok(Some(release))
+}
+
+fn read(url: &str) -> Result<String, String> {
+    get(url)?
         .body_mut()
         .read_to_string()
-        .map_err(|error| error.to_string())?;
-    newer(&body, current, std::env::consts::OS, std::env::consts::ARCH)
+        .map_err(|error| error.to_string())
 }
 
 fn newer(body: &str, current: &str, os: &str, arch: &str) -> Result<Option<Release>, String> {
@@ -73,6 +93,7 @@ fn newer(body: &str, current: &str, os: &str, arch: &str) -> Result<Option<Relea
     Ok(asset.map(|asset| Release {
         version,
         page: latest.html_url,
+        notes: Vec::new(),
         asset,
     }))
 }

@@ -19,8 +19,11 @@ use shakmaty::{CastlingMode, Chess, Color, EnPassantMode, Move, Position, Role, 
 
 use crate::{Decision, Opponent, PlayerError};
 
-/// The ratings there are networks calibrated for.
-pub const LEVELS: [u32; 3] = [500, 1000, 1500];
+/// The ratings to offer, every 100 points. The training games go down to 400, but players rated
+/// 400 to 600 lose about as much per move, so a level below 500 would play no differently.
+pub const LEVELS: [u32; 14] = [
+    500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800,
+];
 
 const PIECE_CODES: usize = 13;
 const PLANES: usize = PIECE_CODES + 4;
@@ -257,9 +260,18 @@ impl Network {
         })
     }
 
-    /// The temperature fitted for `level`; 1, the network's own, for one it doesn't know.
+    /// The temperature fitted for `level`. Between fitted levels it's read off the line joining
+    /// them, beyond them it's the nearest one's, and with none fitted it's 1, the network's own.
     pub fn temperature(&self, level: u32) -> f32 {
-        self.temperatures.get(&level).copied().unwrap_or(1.)
+        let below = self.temperatures.range(..=level).next_back();
+        let above = self.temperatures.range(level..).next();
+        match (below, above) {
+            (Some((&low, &cold)), Some((&high, &hot))) if low < high => {
+                cold + (hot - cold) * (level - low) as f32 / (high - low) as f32
+            }
+            (Some((_, &t)), _) | (None, Some((_, &t))) => t,
+            (None, None) => 1.,
+        }
     }
 
     /// The legal moves, each with its logit for a player rated `elo`.
@@ -506,9 +518,19 @@ mod tests {
     #[test]
     fn levels_play_at_their_own_temperature() {
         let network = Network::from_bytes(TINY).unwrap();
-        assert!((network.temperature(500) - 1.05).abs() < 1e-6);
-        assert!((network.temperature(1500) - 0.84).abs() < 1e-6);
-        assert!((network.temperature(1000) - 1.).abs() < f32::EPSILON);
+        // The fixture has 500 at 1.05 and 1500 at 0.84.
+        for (level, expected) in [
+            (500, 1.05),
+            (1500, 0.84),
+            (1000, 0.945),
+            (400, 1.05),
+            (1800, 0.84),
+        ] {
+            assert!(
+                (network.temperature(level) - expected).abs() < 1e-6,
+                "{level}"
+            );
+        }
     }
 
     #[test]
