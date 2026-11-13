@@ -457,9 +457,10 @@ impl SettingsView {
         // Updating fetches the latest again: only worth it when that's another one.
         let wanted = missing.is_some() || matches!(release, EngineRelease::Newer(_));
         let busy = downloading.is_some();
-        let (id, key) = match engine {
-            Engine::Stockfish => ("download-stockfish", "stockfish"),
-            Engine::Maia => ("download-maia", "lc0"),
+        let (id, key, choose) = match engine {
+            Engine::Stockfish => ("download-stockfish", "stockfish", "choose-program"),
+            Engine::Shadowchess => ("download-shadowchess", "shadowchess_weights", "choose-file"),
+            Engine::Maia => ("download-maia", "lc0", "choose-program"),
         };
         let label = tr(if missing.is_some() {
             "download"
@@ -479,7 +480,7 @@ impl SettingsView {
         } else {
             ui::disabled_button(id, label, &settings).into_any_element()
         };
-        let choose = ui::action_button(("choose", id.len()), tr("choose-program"), &settings)
+        let choose = ui::action_button(("choose", id.len()), tr(choose), &settings)
             .on_click(cx.listener(move |_, _, _, cx| Self::choose_path(key, false, cx)));
         ui::setting_row(kind.name(), Some(hint), &settings)
             .child(div().flex().gap_1().child(choose).child(download))
@@ -495,6 +496,7 @@ impl SettingsView {
                 can_download_stockfish(),
                 cx,
             ),
+            self.engine_row(Engine::Shadowchess, OpponentKind::Shadowchess, true, cx),
             self.engine_row(Engine::Maia, OpponentKind::Maia, can_download_lc0(), cx),
         ];
         let weights = settings.maia_weights.display().to_string();

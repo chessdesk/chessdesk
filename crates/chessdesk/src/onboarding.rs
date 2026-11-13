@@ -1,13 +1,13 @@
 //! The welcome on first start. First the few choices that make Chessdesk look and sound like
 //! one's own, the settings pages' own rows, which apply as they're picked. Then the opponents:
-//! the agents one uses and Stockfish, set up before the welcome closes. Last, if an agent was
-//! set up, the model each one reviews games and gives hints with.
+//! the agents one uses, Stockfish, Shadowchess unless turned off and Maia if turned on, set up
+//! before the welcome closes. Last, if an agent was set up, the model each one reviews games
+//! and gives hints with.
 
 use std::collections::VecDeque;
 
 use chessdesk_players::acp::AgentKind;
 use chessdesk_players::adapters::{self, Readiness};
-use chessdesk_players::download;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, Pixels, Subscription, Window, div, prelude::*,
     px,
@@ -62,6 +62,12 @@ pub struct Onboarding {
     agents: Vec<AgentKind>,
     /// Adapters still to install: one at a time.
     queue: VecDeque<AgentKind>,
+    /// Whether Shadowchess and Maia are to be fetched: the one on until turned off, the
+    /// other off until turned on.
+    shadowchess: bool,
+    maia: bool,
+    /// Engines still to fetch: one at a time too, alongside the adapters.
+    downloads: VecDeque<Engine>,
     /// What each agent offers, for the last step.
     catalog: Entity<Catalog>,
     /// The last step's pickers, one for each agent picked that's ready, and what keeps their
@@ -75,9 +81,9 @@ pub struct Onboarding {
 impl EventEmitter<Done> for Onboarding {}
 impl EventEmitter<Failed> for Onboarding {}
 
-/// Whether Stockfish is missing and Chessdesk can fetch it.
-fn stockfish_wanted(settings: &Settings) -> bool {
-    download::can_download_stockfish() && OpponentKind::Stockfish.missing(settings).is_some()
+/// Whether the engine `kind` plays with is missing and Chessdesk can fetch it.
+fn fetchable(kind: OpponentKind, settings: &Settings) -> bool {
+    kind.downloadable() && kind.missing(settings).is_some()
 }
 
 impl Onboarding {
@@ -90,19 +96,36 @@ impl Onboarding {
             .copied()
             .filter(|kind| adapters::readiness(*kind, &folder) == Readiness::NoAdapter)
             .collect();
-        // Not a choice: analysis, hints and the likelihood all need it.
-        if stockfish_wanted(&Settings::get(cx)) {
-            self.installs.update(cx, |installs, cx| {
-                installs.fetch_for(OpponentKind::Stockfish, cx);
-            });
-        }
+        let settings = Settings::get(cx);
+        // Stockfish is not a choice: analysis, hints and the likelihood all need it.
+        let picked = [
+            (OpponentKind::Stockfish, true),
+            (OpponentKind::Shadowchess, self.shadowchess),
+            (OpponentKind::Maia, self.maia),
+        ];
+        self.downloads = picked
+            .into_iter()
+            .filter(|(kind, on)| *on && fetchable(*kind, &settings))
+            .filter_map(|(kind, _)| Engine::of(kind))
+            .collect();
         self.advance(cx);
     }
 
-    /// Starts the next adapter once the last is in. Then on to the models, if an agent is
-    /// ready to use, or else the end once Stockfish is here. A failed install is reported by
-    /// the window and doesn't hold up the rest.
+    /// Whether an engine is still on its way, or still to come.
+    fn fetching(&self, cx: &App) -> bool {
+        self.installs.read(cx).downloading().is_some() || !self.downloads.is_empty()
+    }
+
+    /// Starts the next engine once the last is in, and the next adapter alongside. Then on to
+    /// the models, if an agent is ready to use, or else the end once the engines are here. A
+    /// failed install is reported by the window and doesn't hold up the rest.
     fn advance(&mut self, cx: &mut Context<Self>) {
+        if self.installs.read(cx).downloading().is_none()
+            && let Some(engine) = self.downloads.pop_front()
+        {
+            self.installs
+                .update(cx, |installs, cx| installs.download(engine, cx));
+        }
         if self.step != Step::SettingUp {
             return;
         }
@@ -145,9 +168,9 @@ impl Onboarding {
         !self.pickers.is_empty()
     }
 
-    /// Ends the welcome, once Stockfish is here: the dialog waits for it.
+    /// Ends the welcome, once the engines are here: the dialog waits for them.
     fn finish(&mut self, cx: &mut Context<Self>) {
-        if self.installs.read(cx).downloading().is_some() {
+        if self.fetching(cx) {
             return;
         }
         self.step = Step::Finished;
@@ -247,27 +270,67 @@ impl Onboarding {
             })
             .collect();
         rows.push(ui::separator(window, &settings).my_2().into_any_element());
-        rows.push(self.stockfish_row(window, cx));
+        // On and fixed: it's fetched with the rest.
+        rows.push(self.engine_row(
+            OpponentKind::Stockfish,
+            true,
+            None::<fn(&mut Self)>,
+            window,
+            cx,
+        ));
+        rows.push(self.engine_row(
+            OpponentKind::Shadowchess,
+            self.shadowchess,
+            Some(|this: &mut Self| this.shadowchess = !this.shadowchess),
+            window,
+            cx,
+        ));
+        rows.push(self.engine_row(
+            OpponentKind::Maia,
+            self.maia,
+            Some(|this: &mut Self| this.maia = !this.maia),
+            window,
+            cx,
+        ));
         div().flex().flex_col().children(rows).into_any_element()
     }
 
-    fn stockfish_row(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// An engine's row: on to be fetched with the rest, and with no switch once it's here or
+    /// when it can't be fetched for this machine.
+    fn engine_row(
+        &self,
+        kind: OpponentKind,
+        on: bool,
+        flip: Option<impl Fn(&mut Self) + 'static>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let settings = Settings::get(cx);
-        let fetching = self.installs.read(cx).downloading();
-        let hint = match fetching {
-            Some((Engine::Stockfish, done)) => {
-                tr_with!("downloading", percent = (done * 100.).round() as u32)
-            }
-            _ if OpponentKind::Stockfish.missing(&settings).is_none() => tr("installed"),
-            _ if download::can_download_stockfish() => tr("stockfish-offer"),
-            _ => tr("stockfish-missing"),
+        let fetching = self
+            .installs
+            .read(cx)
+            .downloading()
+            .filter(|(engine, _)| Engine::of(kind) == Some(*engine));
+        let (logo, offer, missing) = match kind {
+            OpponentKind::Stockfish => (Logo::Stockfish, "stockfish-offer", "stockfish-missing"),
+            OpponentKind::Shadowchess => (
+                Logo::Shadowchess,
+                "shadowchess-offer",
+                "shadowchess-missing",
+            ),
+            _ => (Logo::Maia, "maia-offer", "maia-missing"),
         };
-        let row = ui::logo_setting_row(Logo::Stockfish, "Stockfish", Some(hint), &settings);
-        if !stockfish_wanted(&settings) && fetching.is_none() {
+        let hint = match fetching {
+            Some((_, done)) => tr_with!("downloading", percent = (done * 100.).round() as u32),
+            None if kind.missing(&settings).is_none() => tr("installed"),
+            None if kind.downloadable() => tr(offer),
+            None => tr(missing),
+        };
+        let row = ui::logo_setting_row(logo, kind.name(), Some(hint), &settings);
+        if !fetchable(kind, &settings) && fetching.is_none() {
             return row.into_any_element();
         }
-        // On and fixed: it's fetched with the rest.
-        self.switch_row(row, "stockfish", true, None::<fn(&mut Self)>, window, cx)
+        self.switch_row(row, kind.name(), on, flip, window, cx)
     }
 
     fn buttons(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -301,8 +364,8 @@ impl Onboarding {
                     ui::primary_button("welcome-done", tr("welcome-finish"), &settings)
                         .on_click(cx.listener(|this, _, _, cx| this.finish_setup(cx))),
                 ),
-            // Stockfish may still be on its way: the welcome closes once it's here.
-            Step::Models if self.installs.read(cx).downloading().is_none() => buttons.child(
+            // The engines may still be on their way: the welcome closes once they're here.
+            Step::Models if !self.fetching(cx) => buttons.child(
                 ui::primary_button("welcome-done", tr("welcome-finish"), &settings)
                     .on_click(cx.listener(|this, _, _, cx| this.finish(cx))),
             ),
@@ -390,6 +453,9 @@ pub fn dialog(
             step: Step::Looks,
             agents: Vec::new(),
             queue: VecDeque::new(),
+            shadowchess: true,
+            maia: false,
+            downloads: VecDeque::new(),
             catalog,
             pickers: Vec::new(),
             _subscriptions: subscriptions,

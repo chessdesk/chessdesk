@@ -15,7 +15,7 @@ use super::flow::helper_config;
 use crate::screenshot;
 use crate::script::{Command, Ply, Step};
 use crate::settings::Settings;
-use crate::setup::{Setup, Side};
+use crate::setup::{OpponentKind, Setup, Side};
 
 /// How long a command waits for the game to settle unless the script says otherwise: enough
 /// for Stockfish to answer and analyse a short game.
@@ -62,13 +62,24 @@ impl Chessdesk {
 
     fn run_command(&mut self, command: Command, cx: &mut Context<Self>) -> Result<(), String> {
         match command {
-            Command::New { side, elo, fen } => {
+            Command::New {
+                side,
+                elo,
+                shadowchess,
+                fen,
+            } => {
                 let setup = Setup {
                     side: if side.is_white() {
                         Side::White
                     } else {
                         Side::Black
                     },
+                    opponent: if shadowchess.is_some() {
+                        OpponentKind::Shadowchess
+                    } else {
+                        OpponentKind::Stockfish
+                    },
+                    shadowchess_level: shadowchess.unwrap_or(1000),
                     stockfish_elo: Some(elo),
                     fen,
                     annotate: false,

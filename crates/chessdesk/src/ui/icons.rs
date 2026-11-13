@@ -44,11 +44,12 @@ icons! {
     ChessQueen => "chess-queen",
     ChessRook => "chess-rook",
     Close => "x",
-    // Agents' marks in a single colour, which takes the theme's.
+    // Marks in a single colour, which takes the theme's: agents' and Shadowchess's.
     CopilotLogo => "copilot",
     Logo => "logo",
     Logotype => "logotype",
     OpenCodeLogo => "opencode",
+    ShadowchessLogo => "shadowchess",
     Spinner => "loader-circle",
     Warning => "triangle-alert",
     // The window controls' own, drawn lighter than the rest.
@@ -102,6 +103,7 @@ impl AssetSource for Assets {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Logo {
     Stockfish,
+    Shadowchess,
     Maia,
     ClaudeCode,
     Codex,
@@ -156,6 +158,7 @@ pub fn logo(logo: Logo, size: Pixels, color: Hsla) -> AnyElement {
     let mark = |name| icon(name, size, color).into_any_element();
     match logo {
         Logo::Stockfish => image(&STOCKFISH),
+        Logo::Shadowchess => mark(Icon::ShadowchessLogo),
         Logo::Maia => image(&MAIA),
         Logo::ClaudeCode => image(&CLAUDE_CODE),
         Logo::Codex => image(&CODEX),
