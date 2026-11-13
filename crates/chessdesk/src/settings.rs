@@ -60,6 +60,7 @@ struct Config {
     stockfish: String,
     lc0: String,
     maia_weights: String,
+    shadowchess_weights: String,
     /// By agent id; `""` is the agent's own default.
     #[serde(default)]
     analysis_models: BTreeMap<String, String>,
@@ -256,6 +257,7 @@ pub struct Settings {
     pub stockfish: String,
     pub lc0: String,
     pub maia_weights: PathBuf,
+    pub shadowchess_weights: PathBuf,
     /// The model each agent reviews and gives hints with, by agent id; `""` is its default.
     analysis_models: BTreeMap<String, String>,
     pub pieces: PieceImages,
@@ -485,6 +487,7 @@ impl Settings {
             stockfish: config.stockfish,
             lc0: config.lc0,
             maia_weights: PathBuf::from(config.maia_weights),
+            shadowchess_weights: PathBuf::from(config.shadowchess_weights),
             analysis_models: config.analysis_models,
             pieces,
             board,

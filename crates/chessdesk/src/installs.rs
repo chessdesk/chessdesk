@@ -27,23 +27,26 @@ const PROGRESS_TICK: Duration = Duration::from_millis(200);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Engine {
     Stockfish,
+    Shadowchess,
     Maia,
 }
 
 impl Engine {
-    const ALL: [Self; 2] = [Self::Stockfish, Self::Maia];
+    const ALL: [Self; 3] = [Self::Stockfish, Self::Shadowchess, Self::Maia];
 
     fn name(self) -> &'static str {
         match self {
             Self::Stockfish => "Stockfish",
+            Self::Shadowchess => "Shadowchess",
             Self::Maia => "Maia",
         }
     }
 
-    /// The program whose release counts: for Maia, `lc0`. Its networks never change.
+    /// The folder whose release counts: for Maia, `lc0`'s. Its networks never change.
     fn program(self) -> &'static str {
         match self {
             Self::Stockfish => "stockfish",
+            Self::Shadowchess => "shadowchess",
             Self::Maia => "lc0",
         }
     }
@@ -51,7 +54,18 @@ impl Engine {
     fn latest(self) -> Result<String, String> {
         match self {
             Self::Stockfish => download::latest_stockfish(),
+            Self::Shadowchess => download::latest_shadowchess(),
             Self::Maia => download::latest_lc0(),
+        }
+    }
+
+    /// The engine an opponent plays with, if it's one.
+    pub fn of(opponent: OpponentKind) -> Option<Self> {
+        match opponent {
+            OpponentKind::Stockfish => Some(Self::Stockfish),
+            OpponentKind::Shadowchess => Some(Self::Shadowchess),
+            OpponentKind::Maia => Some(Self::Maia),
+            _ => None,
         }
     }
 }
@@ -132,6 +146,10 @@ fn install_engine(
         Engine::Stockfish => {
             let program = download::install_stockfish(root, progress)?;
             Ok(vec![("stockfish", program)])
+        }
+        Engine::Shadowchess => {
+            let weights = download::install_shadowchess(root, progress)?;
+            Ok(vec![("shadowchess_weights", weights)])
         }
         Engine::Maia => {
             let (lc0, weights) = download::install_maia(root, progress)?;
@@ -249,17 +267,13 @@ impl Installs {
     /// Starts fetching what `opponent` needs to play: its engine or its agent's adapter.
     /// Nothing happens while one of the same kind is under way: one at a time.
     pub fn fetch_for(&mut self, opponent: OpponentKind, cx: &mut Context<Self>) {
-        let engine = match opponent {
-            OpponentKind::Stockfish => Engine::Stockfish,
-            OpponentKind::Maia => Engine::Maia,
-            agent => {
-                if let Some(kind) = agent.agent()
-                    && self.installing.is_none()
-                {
-                    self.install_adapter(kind, cx);
-                }
-                return;
+        let Some(engine) = Engine::of(opponent) else {
+            if let Some(kind) = opponent.agent()
+                && self.installing.is_none()
+            {
+                self.install_adapter(kind, cx);
             }
+            return;
         };
         if self.downloading.is_none() {
             self.download(engine, cx);
@@ -490,7 +504,7 @@ pub fn stockfish_notice(need: NeedsStockfish, installs: &Entity<Installs>, cx: &
     let button = |busy| ui::notice_button("download-stockfish", tr("download"), busy, &settings);
     let action = match installs.read(cx).downloading() {
         Some((Engine::Stockfish, _)) => button(true),
-        // Maia, fetched first: one download at a time.
+        // Another engine, fetched first: one download at a time.
         Some(_) => button(true).opacity(0.5),
         None => {
             let installs = installs.clone();

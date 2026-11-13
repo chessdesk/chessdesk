@@ -3,6 +3,18 @@
 Notable changes per version. The format follows [Keep a Changelog](https://keepachangelog.com):
 minor versions bring features, patch versions only fixes.
 
+## 2.9.0 - 2026-11-13
+
+### Added
+
+- Shadowchess, a new opponent that plays like Lichess players rated 500, 1000 or 1500, mistakes
+  included: it picks moves by how likely such a player is to play them, at a strength calibrated
+  against Stockfish, where Maia always plays its likeliest move and so plays well above its rating.
+  It runs in Chessdesk itself on every system, and its 14 MB of networks come from
+  [chessdesk/shadowchess](https://github.com/chessdesk/shadowchess)
+- The welcome's opponents page offers Shadowchess, on unless you turn it off, and Maia, off unless
+  you turn it on, below Stockfish
+
 ## 2.8.1 - 2026-11-10
 
 ### Fixed

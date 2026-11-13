@@ -6,7 +6,7 @@
 </p>
 
 <p align="center"><b>Play chess against Claude Code, Codex and the other AI agents you already use.</b><br>
-Or against Stockfish and Maia. Free, open source, on your own machine.</p>
+Or against Stockfish, Shadowchess and Maia. Free, open source, on your own machine.</p>
 
 <p align="center"><b><a href="https://github.com/chessdesk/chessdesk/releases/latest">Download for Windows, macOS and Linux</a></b><br>
 <a href="#download">What your system asks on the first start</a></p>
@@ -27,8 +27,10 @@ files.
 account. Pick any model the agent offers and how hard it thinks, and tell it how to play in your own
 words: "Open with the London System", "Go easy on me", "Play like it's 1852".
 
-**Or play an engine.** Stockfish goes from about 1320 engine Elo up to full strength. Maia is
-trained on human games, so it makes human mistakes.
+**Or play an engine.** Stockfish goes from about 1320 engine Elo up to full strength.
+[Shadowchess](https://github.com/chessdesk/shadowchess) plays like Lichess players rated 500, 1000
+or 1500, with as many mistakes as they make. Maia is trained on human games too, but plays well
+above its rating.
 
 **Learn while you play.** Turn on tutoring mode and the agent comments as you go, or Stockfish rates
 each of your moves against an engine. Hint shows you a good move when you're stuck: from Stockfish,
@@ -85,6 +87,7 @@ Everything is under Settings (`Ctrl+,`), and the new game dialog tells you if so
 | OpenCode | [OpenCode](https://opencode.ai), set up with a provider |
 | Pi | [Pi](https://github.com/earendil-works/pi), set up with a provider, Node.js, and the adapter |
 | Stockfish | Nothing: the first start downloads it, or one click under Settings, Engines |
+| Shadowchess | Nothing: the first start downloads it unless you turn it off, or one click under Settings, Engines |
 | Maia | Nothing on Windows: download it under Settings, Engines. Elsewhere, install [lc0](https://lczero.org) yourself |
 
 ## What agents cost

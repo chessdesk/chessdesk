@@ -6,6 +6,7 @@ use std::rc::Rc;
 use chessdesk_core::Game;
 use chessdesk_players::acp::{AgentKind, Effort};
 use chessdesk_players::download::MAIA_LEVELS;
+use chessdesk_players::shadowchess;
 use gpui::{
     AnyElement, App, Axis, Context, Div, Entity, EventEmitter, MouseButton, Pixels, SharedString,
     Subscription, Window, div, prelude::*, px, transparent_black,
@@ -102,6 +103,7 @@ fn field(id: &'static str, label_id: &str) -> Field {
 fn logo_of(kind: OpponentKind) -> Option<Logo> {
     match kind {
         OpponentKind::Stockfish => Some(Logo::Stockfish),
+        OpponentKind::Shadowchess => Some(Logo::Shadowchess),
         OpponentKind::Maia => Some(Logo::Maia),
         _ => kind.agent().map(Logo::of_agent),
     }
@@ -523,6 +525,22 @@ impl NewGame {
                     tr("strength"),
                     value,
                     (stops, index),
+                    pick,
+                    window,
+                    cx,
+                ))
+            }
+            OpponentKind::Shadowchess => {
+                let index = nearest_stop(&shadowchess::LEVELS, setup.shadowchess_level);
+                let value = tr_with!("shadowchess-strength", rating = setup.shadowchess_level);
+                let pick = |setup: &mut Setup, stop: usize| {
+                    setup.shadowchess_level = shadowchess::LEVELS[stop];
+                };
+                Some(Self::level_row(
+                    "strength",
+                    tr("strength"),
+                    value,
+                    (shadowchess::LEVELS.len(), index),
                     pick,
                     window,
                     cx,

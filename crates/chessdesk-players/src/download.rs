@@ -16,6 +16,10 @@ const STOCKFISH_RELEASES: &str =
     "https://api.github.com/repos/official-stockfish/Stockfish/releases/latest";
 const LC0_RELEASES: &str = "https://api.github.com/repos/LeelaChessZero/lc0/releases/latest";
 const MAIA_WEIGHTS: &str = "https://github.com/CSSLab/maia-chess/releases/download/v1.0";
+const SHADOWCHESS_RELEASES: &str =
+    "https://api.github.com/repos/chessdesk/shadowchess/releases/latest";
+/// The release asset with all the levels' weights.
+const SHADOWCHESS_WEIGHTS: &str = "shadowchess.safetensors";
 /// The networks there are, by the rating they imitate.
 pub const MAIA_LEVELS: [u32; 9] = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900];
 /// Beside an engine Chessdesk installed: the release it came from, to tell when there's a newer.
@@ -157,6 +161,11 @@ pub fn latest_lc0() -> Result<String, String> {
     latest(LC0_RELEASES).map(|release| release.tag_name)
 }
 
+/// The newest Shadowchess networks, such as `v1.0.0`.
+pub fn latest_shadowchess() -> Result<String, String> {
+    latest(SHADOWCHESS_RELEASES).map(|release| release.tag_name)
+}
+
 /// The release the engine in `folder` was installed from, if Chessdesk installed it.
 pub fn installed_release(folder: &Path) -> Option<String> {
     let text = fs::read_to_string(folder.join(RELEASE_FILE)).ok()?;
@@ -275,6 +284,23 @@ pub fn install_stockfish(root: &Path, progress: &mut dyn FnMut(f32)) -> Result<P
         "stockfish",
         progress,
     )
+}
+
+/// Installs the latest Shadowchess networks under `root`, returning the weights file. They
+/// run in Chessdesk itself, so there's no program, and every machine can have them.
+pub fn install_shadowchess(root: &Path, progress: &mut dyn FnMut(f32)) -> Result<PathBuf, String> {
+    let release = latest(SHADOWCHESS_RELEASES)?;
+    let asset = pick(&release.assets, SHADOWCHESS_WEIGHTS)
+        .ok_or_else(|| format!("no {SHADOWCHESS_WEIGHTS} in the release"))?;
+    let folder = engine_folder(root, "shadowchess");
+    fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+    let target = folder.join(SHADOWCHESS_WEIGHTS);
+    // Under its own name only once whole, so that a broken download never passes for it.
+    let partial = target.with_extension("part");
+    fetch(&asset.browser_download_url, &partial, progress)?;
+    fs::rename(&partial, &target).map_err(|error| error.to_string())?;
+    fs::write(folder.join(RELEASE_FILE), &release.tag_name).map_err(|error| error.to_string())?;
+    Ok(target)
 }
 
 /// Installs `lc0` and the Maia networks under `root`, returning the program and the

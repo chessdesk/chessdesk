@@ -92,7 +92,7 @@ analysis running, no pieces moving, and no agent being asked for its models or e
 
 | Command | Does |
 |---|---|
-| `new white\|black [elo N] [fen FEN]` | A casual game against Stockfish, at 1320 unless `elo` says otherwise, from the start or the FEN (the rest of the line). New Game's remembered choices stay as they were. |
+| `new white\|black [elo N] [shadowchess LEVEL] [fen FEN]` | A casual game against Stockfish, at 1320 unless `elo` says otherwise, or against Shadowchess at `LEVEL` (500, 1000 or 1500), from the start or the FEN (the rest of the line). New Game's remembered choices stay as they were. |
 | `open PATH` | Opens a saved game. |
 | `play SAN...` | Plays the player's moves, each once the opponent has answered the one before. |
 | `resign` | Resigns the game on show. |

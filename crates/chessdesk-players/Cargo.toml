@@ -11,8 +11,13 @@ publish.workspace = true
 [dependencies]
 agent-client-protocol = { version = "5", features = ["process", "unstable_session_system_prompt", "unstable_end_turn_token_usage"] }
 chessdesk-core.workspace = true
+fastrand = "2.5.0"
 flate2 = "1"
 futures = "0.3"
+half = "2.7.1"
+libm = "0.2.16"
+ndarray = "0.17.2"
+safetensors = "0.8.0"
 self-replace = "1"
 semver = "1"
 serde.workspace = true

@@ -10,6 +10,7 @@ use chessdesk_players::PlayerError;
 use chessdesk_players::acp::{AgentConfig, AgentKind, AgentOpponent, Effort};
 use chessdesk_players::adapters::{Readiness, readiness};
 use chessdesk_players::download;
+use chessdesk_players::shadowchess::Shadowchess;
 use chessdesk_players::uci::{Engine, EngineConfig};
 use gpui::SharedString;
 use serde::{Deserialize, Serialize};
@@ -68,17 +69,19 @@ pub enum OpponentKind {
     OpenCode,
     Pi,
     Stockfish,
+    Shadowchess,
     Maia,
 }
 
 impl OpponentKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::ClaudeCode,
         Self::Codex,
         Self::Copilot,
         Self::OpenCode,
         Self::Pi,
         Self::Stockfish,
+        Self::Shadowchess,
         Self::Maia,
     ];
 
@@ -90,6 +93,7 @@ impl OpponentKind {
             Self::OpenCode => "OpenCode",
             Self::Pi => "Pi",
             Self::Stockfish => "Stockfish",
+            Self::Shadowchess => "Shadowchess",
             Self::Maia => "Maia",
         }
     }
@@ -101,7 +105,7 @@ impl OpponentKind {
             Self::Copilot => Some(AgentKind::Copilot),
             Self::OpenCode => Some(AgentKind::OpenCode),
             Self::Pi => Some(AgentKind::Pi),
-            Self::Stockfish | Self::Maia => None,
+            Self::Stockfish | Self::Shadowchess | Self::Maia => None,
         }
     }
 
@@ -119,6 +123,8 @@ impl OpponentKind {
     pub fn downloadable(self) -> bool {
         match self {
             Self::Stockfish => download::can_download_stockfish(),
+            // Runs in Chessdesk itself: every machine can have it.
+            Self::Shadowchess => true,
             Self::Maia => download::can_download_lc0(),
             agent => agent.agent().is_some_and(|kind| {
                 readiness(kind, &Settings::adapters_dir().unwrap_or_default())
@@ -147,6 +153,8 @@ impl OpponentKind {
             Self::Stockfish => which::which(&settings.stockfish)
                 .is_err()
                 .then(|| tr("stockfish-missing").to_string()),
+            Self::Shadowchess => (!settings.shadowchess_weights.is_file())
+                .then(|| tr("shadowchess-missing").to_string()),
             _ => (which::which(&settings.lc0).is_err() || !settings.maia_weights.is_dir())
                 .then(|| tr("maia-missing").to_string()),
         }
@@ -193,6 +201,8 @@ pub struct Setup {
     pub instructions: String,
     /// `None` is full strength.
     pub stockfish_elo: Option<u32>,
+    /// The rating of the human players Shadowchess plays like.
+    pub shadowchess_level: u32,
     pub maia_level: u32,
     /// Minutes each, and seconds added per move. No minutes is no clock.
     pub minutes: u32,
@@ -216,6 +226,7 @@ impl Default for Setup {
             effort: Effort::default(),
             instructions: String::new(),
             stockfish_elo: Some(1500),
+            shadowchess_level: 1000,
             maia_level: 1500,
             minutes: 0,
             increment: 0,
@@ -324,6 +335,7 @@ impl Setup {
                 Some(elo) => format!("Stockfish {elo}"),
                 None => "Stockfish".to_owned(),
             },
+            OpponentKind::Shadowchess => format!("Shadowchess {}", self.shadowchess_level),
             OpponentKind::Maia => format!("Maia ~{}", maia_strength(self.maia_level)),
             kind => {
                 let model = self
@@ -365,6 +377,10 @@ impl Setup {
                     &weights.to_string_lossy(),
                 ))
             }
+            None if self.opponent == OpponentKind::Shadowchess => OpponentPlan::Shadowchess {
+                weights: settings.shadowchess_weights.clone(),
+                level: self.shadowchess_level,
+            },
             None => OpponentPlan::Engine(EngineConfig::stockfish(
                 &settings.stockfish,
                 self.stockfish_elo,
@@ -382,6 +398,11 @@ pub enum OpponentPlan {
         annotate: bool,
     },
     Engine(EngineConfig),
+    /// Played in Chessdesk itself, from the weights file.
+    Shadowchess {
+        weights: PathBuf,
+        level: u32,
+    },
 }
 
 impl OpponentPlan {
@@ -393,6 +414,7 @@ impl OpponentPlan {
                 annotate,
             } => Box::new(AgentOpponent::start(config, *side, *annotate)),
             Self::Engine(config) => Box::new(Engine::start(config)?),
+            Self::Shadowchess { weights, level } => Box::new(Shadowchess::load(weights, *level)?),
         })
     }
 }
@@ -528,5 +550,10 @@ mod tests {
             ..Setup::default()
         };
         assert_eq!(maia.opponent_name(), "Maia ~1575");
+        let shadowchess = Setup {
+            opponent: OpponentKind::Shadowchess,
+            ..Setup::default()
+        };
+        assert_eq!(shadowchess.opponent_name(), "Shadowchess 1000");
     }
 }

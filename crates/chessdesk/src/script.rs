@@ -17,10 +17,11 @@ pub const DEFAULT_ELO: u32 = 1320;
 /// One thing a script does. Each waits until the game on show has settled first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// A casual game against Stockfish, from the usual start or a FEN.
+    /// A casual game against Stockfish, or Shadowchess at a level, from the usual start or a FEN.
     New {
         side: Color,
         elo: u32,
+        shadowchess: Option<u32>,
         fen: Option<String>,
     },
     Open(PathBuf),
@@ -125,7 +126,7 @@ fn command(text: &str, base: &Path) -> Result<Command, String> {
     }
 }
 
-/// `new white|black [elo N] [fen FEN]`, the FEN taking the rest of the line.
+/// `new white|black [elo N] [shadowchess LEVEL] [fen FEN]`, the FEN taking the rest of the line.
 fn new_game(rest: &str) -> Result<Command, String> {
     let (side, mut rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let side = match side {
@@ -134,6 +135,7 @@ fn new_game(rest: &str) -> Result<Command, String> {
         _ => return Err("`new` takes `white` or `black` first".to_owned()),
     };
     let mut elo = DEFAULT_ELO;
+    let mut shadowchess = None;
     let mut fen = None;
     loop {
         rest = rest.trim_start();
@@ -141,14 +143,21 @@ fn new_game(rest: &str) -> Result<Command, String> {
             break;
         }
         let (word, after) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        let (value, next) = after.trim_start().split_once(' ').unwrap_or((after, ""));
+        let number = || {
+            value
+                .trim()
+                .parse::<u32>()
+                .map_err(|_| format!("`{word}` takes a number"))
+        };
         match word {
             "elo" => {
-                let (value, after) = after.trim_start().split_once(' ').unwrap_or((after, ""));
-                elo = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| "`elo` takes a number".to_owned())?;
-                rest = after;
+                elo = number()?;
+                rest = next;
+            }
+            "shadowchess" => {
+                shadowchess = Some(number()?);
+                rest = next;
             }
             "fen" if !after.trim().is_empty() => {
                 fen = Some(after.trim().to_owned());
@@ -157,7 +166,12 @@ fn new_game(rest: &str) -> Result<Command, String> {
             _ => return Err(format!("`new` doesn't know `{word}`")),
         }
     }
-    Ok(Command::New { side, elo, fen })
+    Ok(Command::New {
+        side,
+        elo,
+        shadowchess,
+        fen,
+    })
 }
 
 /// `review AGENT [model MODEL]`.
@@ -197,6 +211,7 @@ mod tests {
             Command::New {
                 side: Color::White,
                 elo: DEFAULT_ELO,
+                shadowchess: None,
                 fen: Some("6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1".to_owned()),
             }
         );
@@ -215,9 +230,20 @@ mod tests {
             Ok(Command::New {
                 side: Color::Black,
                 elo: 2000,
+                shadowchess: None,
                 fen: None
             })
         );
+        assert_eq!(
+            one("new white shadowchess 500"),
+            Ok(Command::New {
+                side: Color::White,
+                elo: DEFAULT_ELO,
+                shadowchess: Some(500),
+                fen: None
+            })
+        );
+        assert!(one("new white shadowchess weak").is_err());
         assert!(one("new green").is_err());
         assert!(one("new white elo strong").is_err());
         assert!(one("new white fen").is_err());

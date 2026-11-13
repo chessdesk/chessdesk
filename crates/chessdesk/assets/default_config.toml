@@ -37,6 +37,7 @@ window_height = 760.0
 stockfish = "stockfish"        # a program on PATH, or a full path
 lc0 = "lc0"                    # plays Maia
 maia_weights = ""              # the folder holding maia-1100.pb.gz to maia-1900.pb.gz
+shadowchess_weights = ""       # shadowchess.safetensors, which Settings, Engines downloads
 
 # The model each agent reviews games and gives hints with, by the agent: "claude-code",
 # "codex", "copilot", "opencode" or "pi". A model is named as the agent names it, and ""

@@ -1,4 +1,5 @@
-//! Who plays and who analyses: UCI engines and ACP agents, behind one small interface.
+//! Who plays and who analyses: UCI engines, Shadowchess and ACP agents, behind one small
+//! interface.
 //! Everything here blocks, so the app calls it from background threads.
 
 pub mod acp;
@@ -9,6 +10,7 @@ mod illegal;
 mod pi;
 pub mod prompt;
 pub mod reply;
+pub mod shadowchess;
 pub mod uci;
 pub mod update;
 
