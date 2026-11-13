@@ -2,7 +2,7 @@
 //! this rather than the settings page that starts the work, so the work carries on, and shows,
 //! after the page closes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -34,7 +34,7 @@ pub enum Engine {
 impl Engine {
     const ALL: [Self; 3] = [Self::Stockfish, Self::Shadowchess, Self::Maia];
 
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Stockfish => "Stockfish",
             Self::Shadowchess => "Shadowchess",
@@ -51,7 +51,12 @@ impl Engine {
         }
     }
 
-    fn latest(self) -> Result<String, String> {
+    /// Whether Chessdesk can fetch it on this system.
+    fn downloadable(self) -> bool {
+        self != Self::Stockfish || download::can_download_stockfish()
+    }
+
+    fn latest(self) -> Result<download::Latest, String> {
         match self {
             Self::Stockfish => download::latest_stockfish(),
             Self::Shadowchess => download::latest_shadowchess(),
@@ -79,6 +84,12 @@ pub enum EngineRelease {
     /// A newer one is out, or which one is here isn't known: installed by hand, or by a
     /// Chessdesk before 2.3.0.
     Newer(String),
+}
+
+/// Whether Chessdesk fetched `installed` itself and `latest` has replaced it since. An engine
+/// installed by hand, whose release isn't known, is the player's own to keep.
+fn outdated(installed: Option<&str>, latest: Option<&str>) -> bool {
+    matches!((installed, latest), (Some(installed), Some(latest)) if installed != latest)
 }
 
 /// Where `installed` stands against `latest`.
@@ -124,12 +135,14 @@ pub enum AppUpdate {
 #[derive(Default)]
 pub struct Installs {
     downloading: Option<(Engine, Progress)>,
+    /// Engines to update once the one downloading is in.
+    queued: VecDeque<Engine>,
     /// The family of the font being fetched.
     font: Option<(String, Progress)>,
     /// The agent whose adapter is being installed.
     installing: Option<AgentKind>,
     /// Each engine's latest release, once asked for: once a run is enough.
-    latest_engines: HashMap<Engine, String>,
+    latest_engines: HashMap<Engine, download::Latest>,
     engines_checked: bool,
     app_update: AppUpdate,
 }
@@ -174,13 +187,63 @@ impl Installs {
 
     /// Where the installed `engine` stands against its latest release.
     pub fn engine_release(&self, engine: Engine) -> EngineRelease {
-        let installed = Settings::engines_dir().and_then(|root| {
-            download::installed_release(&download::engine_folder(&root, engine.program()))
-        });
         compare(
-            installed.as_deref(),
-            self.latest_engines.get(&engine).map(String::as_str),
+            installed_release(engine).as_deref(),
+            self.latest_tag(engine),
         )
+    }
+
+    fn latest_tag(&self, engine: Engine) -> Option<&str> {
+        self.latest_engines
+            .get(&engine)
+            .map(|latest| latest.tag.as_str())
+    }
+
+    /// What `engine`'s latest release brings, in a sentence or two, if its notes say.
+    pub fn engine_summary(&self, engine: Engine) -> Option<&str> {
+        self.latest_engines.get(&engine)?.summary.as_deref()
+    }
+
+    /// The engines Chessdesk fetched that have a newer release, unless they're being updated.
+    pub fn outdated_engines(&self) -> Vec<Engine> {
+        Engine::ALL
+            .into_iter()
+            .filter(|&engine| {
+                engine.downloadable()
+                    && !self.updating(engine)
+                    && outdated(
+                        installed_release(engine).as_deref(),
+                        self.latest_tag(engine),
+                    )
+            })
+            .collect()
+    }
+
+    fn updating(&self, engine: Engine) -> bool {
+        self.downloading
+            .is_some_and(|(fetching, _)| fetching == engine)
+            || self.queued.contains(&engine)
+    }
+
+    /// Whether an engine is being fetched, or waits to be: a restart now would cut it off.
+    pub fn fetching_engines(&self) -> bool {
+        self.downloading.is_some() || !self.queued.is_empty()
+    }
+
+    /// Updates every outdated engine, one after another.
+    pub fn update_engines(&mut self, cx: &mut Context<Self>) {
+        self.queued.extend(self.outdated_engines());
+        self.download_queued(cx);
+    }
+
+    /// Starts the next queued engine, unless one is downloading.
+    fn download_queued(&mut self, cx: &mut Context<Self>) {
+        // A loop, as a download that can't start leaves `downloading` empty.
+        while self.downloading.is_none()
+            && let Some(engine) = self.queued.pop_front()
+        {
+            self.download(engine, cx);
+        }
     }
 
     /// Asks GitHub for each engine's latest release, once a run, quietly: without an answer
@@ -256,6 +319,8 @@ impl Installs {
             },
             |this, installed, cx| {
                 this.downloading = None;
+                // The next one starts even if this one failed.
+                this.download_queued(cx);
                 for (key, path) in installed? {
                     store(key, path.to_string_lossy().as_ref(), cx);
                 }
@@ -418,13 +483,35 @@ impl Installs {
     }
 
     /// What the update button does at each step: fetch the newer version once one is known,
-    /// start it once it's in place, and ask for one otherwise.
+    /// with the outdated engines alongside; start it once all of it is in place; and ask for
+    /// one otherwise.
     pub fn update_app(&mut self, cx: &mut Context<Self>) {
         match self.app_update.clone() {
             AppUpdate::Unknown | AppUpdate::UpToDate => self.check_for_update(false, cx),
-            AppUpdate::Available(release) => self.download_update(release, cx),
-            AppUpdate::Ready(_, program) => restart(&program, cx),
-            AppUpdate::Checking | AppUpdate::Downloading(..) => {}
+            AppUpdate::Available(release) => {
+                self.download_update(release, cx);
+                self.update_engines(cx);
+            }
+            AppUpdate::Ready(_, program) if !self.fetching_engines() => restart(&program, cx),
+            AppUpdate::Ready(..) | AppUpdate::Checking | AppUpdate::Downloading(..) => {}
+        }
+    }
+
+    /// Whether the update button would only update engines: no newer Chessdesk is known.
+    pub fn engines_only(&self) -> bool {
+        matches!(
+            self.app_update,
+            AppUpdate::Unknown | AppUpdate::UpToDate | AppUpdate::Checking
+        ) && !self.outdated_engines().is_empty()
+    }
+
+    /// What the update button in the title bar does: Chessdesk's update, which brings the
+    /// engines' along, or the engines' alone when there's no newer Chessdesk.
+    pub fn update(&mut self, cx: &mut Context<Self>) {
+        if self.engines_only() {
+            self.update_engines(cx);
+        } else {
+            self.update_app(cx);
         }
     }
 
@@ -452,6 +539,12 @@ impl Installs {
             },
         );
     }
+}
+
+/// The release of `engine` that Chessdesk fetched, if it did.
+fn installed_release(engine: Engine) -> Option<String> {
+    let root = Settings::engines_dir()?;
+    download::installed_release(&download::engine_folder(&root, engine.program()))
 }
 
 /// Starts the new version and quits this one.
@@ -544,5 +637,15 @@ mod tests {
             EngineRelease::Newer("sf_19".to_owned())
         );
         assert_eq!(compare(Some("sf_19"), None), EngineRelease::Unknown);
+    }
+
+    #[test]
+    fn only_an_engine_chessdesk_fetched_is_called_outdated() {
+        assert!(outdated(Some("v1.0.0"), Some("v1.1.0")));
+        assert!(!outdated(Some("v1.1.0"), Some("v1.1.0")));
+        // Installed by hand: the player's choice.
+        assert!(!outdated(None, Some("v1.1.0")));
+        // GitHub not asked, or not reached.
+        assert!(!outdated(Some("v1.0.0"), None));
     }
 }

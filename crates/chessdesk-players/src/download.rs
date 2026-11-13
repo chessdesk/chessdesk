@@ -12,6 +12,8 @@ use serde::Deserialize;
 use ureq::http::Response;
 use ureq::{Agent, Body};
 
+use crate::notes;
+
 const STOCKFISH_RELEASES: &str =
     "https://api.github.com/repos/official-stockfish/Stockfish/releases/latest";
 const LC0_RELEASES: &str = "https://api.github.com/repos/LeelaChessZero/lc0/releases/latest";
@@ -58,7 +60,27 @@ pub fn install_font(url: &str, target: &Path, progress: &mut dyn FnMut(f32)) -> 
 #[derive(Debug, Deserialize)]
 struct Release {
     tag_name: String,
+    /// The release notes, in Markdown; GitHub sends `null` for none.
+    #[serde(default)]
+    body: Option<String>,
     assets: Vec<Asset>,
+}
+
+/// An engine's newest release: its tag, and what it brings in a sentence or two when its notes
+/// open with that.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Latest {
+    pub tag: String,
+    pub summary: Option<String>,
+}
+
+impl From<Release> for Latest {
+    fn from(release: Release) -> Self {
+        Self {
+            summary: release.body.as_deref().and_then(notes::summary),
+            tag: release.tag_name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -152,18 +174,18 @@ fn latest(url: &str) -> Result<Release, String> {
 }
 
 /// The newest Stockfish release, such as `sf_18`.
-pub fn latest_stockfish() -> Result<String, String> {
-    latest(STOCKFISH_RELEASES).map(|release| release.tag_name)
+pub fn latest_stockfish() -> Result<Latest, String> {
+    latest(STOCKFISH_RELEASES).map(Latest::from)
 }
 
 /// The newest `lc0` release, such as `v0.32.1`.
-pub fn latest_lc0() -> Result<String, String> {
-    latest(LC0_RELEASES).map(|release| release.tag_name)
+pub fn latest_lc0() -> Result<Latest, String> {
+    latest(LC0_RELEASES).map(Latest::from)
 }
 
 /// The newest Shadowchess networks, such as `v1.0.0`.
-pub fn latest_shadowchess() -> Result<String, String> {
-    latest(SHADOWCHESS_RELEASES).map(|release| release.tag_name)
+pub fn latest_shadowchess() -> Result<Latest, String> {
+    latest(SHADOWCHESS_RELEASES).map(Latest::from)
 }
 
 /// The release the engine in `folder` was installed from, if Chessdesk installed it.

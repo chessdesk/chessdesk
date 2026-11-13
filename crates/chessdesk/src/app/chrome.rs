@@ -19,7 +19,7 @@ use super::{
     SaveGame, TakeBack, ToggleHistory, ToggleLikelihood, TogglePanel,
 };
 use crate::i18n::{tr, tr_with};
-use crate::installs::AppUpdate;
+use crate::installs::{AppUpdate, Installs};
 use crate::settings::Settings;
 use crate::settings_view::SettingsPage;
 use crate::trace;
@@ -45,6 +45,9 @@ const BRAND_MENU: usize = MENUS.len();
 const ABOUT_WIDTH: Pixels = px(360.);
 const ABOUT_LOGOTYPE_HEIGHT: Pixels = px(22.);
 const REPOSITORY: &str = "https://github.com/chessdesk/chessdesk";
+/// How many of an update's notes show beneath its button, and how wide they run.
+const NOTES_SHOWN: usize = 4;
+const NOTES_WIDTH: Pixels = px(440.);
 const COPYRIGHT: &str = "© 2026 Team Chessdesk";
 
 type Run = Rc<dyn Fn(&mut Chessdesk, &mut Window, &mut Context<Chessdesk>)>;
@@ -87,19 +90,32 @@ fn unavailable(title: impl Into<SharedString>) -> Entry {
     }
 }
 
-/// What the update button says, if there's an update to show it for.
-fn update_label(update: &AppUpdate) -> Option<SharedString> {
-    match update {
+/// What the update button says, if there's an update to show it for: Chessdesk's, which brings
+/// the outdated engines along, or else the engines'.
+fn update_label(installs: &Installs) -> Option<SharedString> {
+    match installs.app_update() {
         AppUpdate::Available(release) => {
             Some(tr_with!("update-to", version = release.version.to_string()))
         }
-        AppUpdate::Ready(..) => Some(tr("restart-to-update")),
-        _ => None,
+        // Not while engines are still coming in: a restart would cut them off.
+        AppUpdate::Ready(..) => (!installs.fetching_engines()).then(|| tr("restart-to-update")),
+        AppUpdate::Downloading(..) => None,
+        AppUpdate::Unknown | AppUpdate::Checking | AppUpdate::UpToDate => {
+            match installs.outdated_engines().as_slice() {
+                [] => None,
+                [engine] => Some(tr_with!("update-engine", name = engine.name())),
+                _ => Some(tr("update-engines")),
+            }
+        }
     }
 }
 
-/// Entries of a menu; `None` is a separator.
-fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Option<Entry>> {
+/// Entries of a menu; `None` is a separator. `update` is the update button's label, if it shows.
+fn menu_entries(
+    index: usize,
+    session: &Session,
+    update: Option<SharedString>,
+) -> Vec<Option<Entry>> {
     match index {
         0 => {
             // A competition is played as it stands.
@@ -151,7 +167,7 @@ fn menu_entries(index: usize, session: &Session, update: &AppUpdate) -> Vec<Opti
                 cx.open_url(REPOSITORY);
             })),
             Some(entry(
-                update_label(update).unwrap_or_else(|| tr("check-for-updates")),
+                update.unwrap_or_else(|| tr("check-for-updates")),
                 |this, _, cx| this.update_app(cx),
             )),
             None,
@@ -300,18 +316,61 @@ impl Chessdesk {
             .into_any_element()
     }
 
-    /// A newer Chessdesk to fetch, or one fetched to start: the way there from anywhere.
+    /// A newer Chessdesk or newer engines to fetch, or a Chessdesk fetched to start: the way
+    /// there from anywhere.
     pub(super) fn update_button(
         &self,
         id: &'static str,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
-        let label = update_label(self.installs.0.read(cx).app_update())?;
+        let label = update_label(self.installs.0.read(cx))?;
         let settings = Settings::get(cx);
         Some(
             ui::primary_button(id, label, &settings)
                 .on_click(cx.listener(|this, _, _, cx| this.update_app(cx))),
         )
+    }
+
+    /// What the update button brings, to show beneath it: Chessdesk's notes since this version,
+    /// then what the outdated engines' releases say, a few lines of it. The Updates page has
+    /// the rest.
+    pub(super) fn update_notes(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let installs = self.installs.0.read(cx);
+        update_label(installs)?;
+        let release = match installs.app_update() {
+            AppUpdate::Available(release) | AppUpdate::Ready(release, _) => Some(release),
+            _ => None,
+        };
+        let mut entries: Vec<SharedString> = release
+            .iter()
+            .flat_map(|release| &release.notes)
+            .flat_map(|notes| notes.entries.iter().cloned().map(SharedString::from))
+            .collect();
+        entries.extend(
+            installs
+                .outdated_engines()
+                .into_iter()
+                .filter_map(|engine| {
+                    let summary = installs.engine_summary(engine)?;
+                    Some(format!("{}: {summary}", engine.name()).into())
+                }),
+        );
+        if entries.is_empty() {
+            return None;
+        }
+        let more = entries.len().saturating_sub(NOTES_SHOWN);
+        entries.truncate(NOTES_SHOWN);
+        if more > 0 {
+            entries.push(tr_with!("notes-more", count = more));
+        }
+        let heading = match release {
+            Some(release) => tr_with!(
+                "whats-new-in",
+                name = format!("Chessdesk {}", release.version)
+            ),
+            None => tr("whats-new"),
+        };
+        Some(ui::notes(heading, entries, &Settings::get(cx)).max_w(NOTES_WIDTH))
     }
 
     /// What takes a while right now: in the game on show first, then in the others, then
@@ -450,8 +509,8 @@ impl Chessdesk {
         } else {
             DROPDOWN_OFFSET
         };
-        let update = self.installs.0.read(cx).app_update().clone();
-        let rows = menu_entries(index, self.session(), &update)
+        let update = update_label(self.installs.0.read(cx));
+        let rows = menu_entries(index, self.session(), update)
             .into_iter()
             .enumerate()
             .map(|(row, entry)| {

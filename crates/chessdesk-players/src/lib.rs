@@ -7,6 +7,7 @@ pub mod adapters;
 pub mod analysis;
 pub mod download;
 mod illegal;
+pub mod notes;
 mod pi;
 pub mod prompt;
 pub mod reply;

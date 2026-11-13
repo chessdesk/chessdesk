@@ -408,8 +408,30 @@ fn labelled_row(label: Div) -> Div {
         .child(label)
 }
 
-/// Something to see to before going on, such as an engine to fetch: a card in the theme's
-/// own colours, its message and a quieter detail beside room for an action, added as a child.
+/// What an update brings: a heading in the text colour over a quieter bulleted list.
+pub fn notes(
+    heading: impl Into<SharedString>,
+    entries: impl IntoIterator<Item = SharedString>,
+    settings: &Settings,
+) -> Div {
+    let entry = |text: SharedString| {
+        div()
+            .flex()
+            .gap_1p5()
+            .child(div().flex_none().child("•"))
+            .child(div().min_w_0().child(text))
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .text_size(settings.ui_font_size * 0.92)
+        .line_height(relative(HINT_LINE_HEIGHT))
+        .text_color(settings.colors.muted)
+        .child(div().text_color(settings.colors.text).child(heading.into()))
+        .children(entries.into_iter().map(entry))
+}
+
 /// The edge of a card or callout: a shade lighter than its fill in a dark theme, a shade
 /// darker in a light one. See-through, so that it works on any tint.
 pub fn card_edge(settings: &Settings) -> Hsla {
@@ -417,6 +439,8 @@ pub fn card_edge(settings: &Settings) -> Hsla {
     if light { black() } else { white() }.opacity(CARD_EDGE)
 }
 
+/// Something to see to before going on, such as an engine to fetch: a card in the theme's
+/// own colours, its message and a quieter detail beside room for an action, added as a child.
 pub fn notice(
     message: impl Into<SharedString>,
     detail: Option<SharedString>,

@@ -200,7 +200,10 @@ impl Chessdesk {
         // Not from a build being worked on, which is never behind and would only use up
         // GitHub's allowance for the engine downloads.
         if !cfg!(debug_assertions) && !scripted {
-            installs.update(cx, |installs, cx| installs.check_for_update(true, cx));
+            installs.update(cx, |installs, cx| {
+                installs.check_for_update(true, cx);
+                installs.check_engines(cx);
+            });
         }
         let mut this = Self {
             focus,
@@ -384,13 +387,20 @@ impl Chessdesk {
         cx.notify();
     }
 
-    /// The Updates page, with its button pressed: the update fetched once one is known, the
-    /// new version started once it's in place, and GitHub asked otherwise.
+    /// The update button pressed, on the page that shows its progress: Engines when it only
+    /// updates engines, Updates otherwise, where Chessdesk's update is fetched once one is
+    /// known (with the outdated engines alongside), started once it's in place, and GitHub
+    /// asked otherwise.
     fn update_app(&mut self, cx: &mut Context<Self>) {
         // New Game would cover the page, as it does at a start with no games yet.
         self.dialog = None;
-        self.show_settings(SettingsPage::Updates, cx);
-        self.installs.0.update(cx, Installs::update_app);
+        let page = if self.installs.0.read(cx).engines_only() {
+            SettingsPage::Engines
+        } else {
+            SettingsPage::Updates
+        };
+        self.show_settings(page, cx);
+        self.installs.0.update(cx, Installs::update);
     }
 
     fn show_export(&mut self, game: Game, path: &Path, cx: &mut Context<Self>) {
@@ -580,6 +590,7 @@ impl Chessdesk {
                     )
                     .children(self.update_button("update-app-empty", cx)),
             )
+            .children(self.update_notes(cx))
             .into_any_element()
     }
 

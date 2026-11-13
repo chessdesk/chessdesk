@@ -737,6 +737,10 @@ impl SettingsView {
                 &settings,
             )
             .into_any_element(),
+            // The engines updated alongside come in first: a restart would cut them off.
+            AppUpdate::Ready(..) if self.installs.read(cx).fetching_engines() => {
+                ui::busy_button("update-app", tr("restart-to-update"), &settings).into_any_element()
+            }
             AppUpdate::Ready(..) => {
                 ui::primary_button("update-app", tr("restart-to-update"), &settings)
                     .on_click(press)
@@ -753,11 +757,25 @@ impl SettingsView {
             ui::action_button("release-notes", tr("release-notes"), &settings)
                 .on_click(move |_, _, cx| cx.open_url(&page))
         });
-        vec![
+        let mut rows = vec![
             ui::setting_row("Chessdesk", Some(hint), &settings)
                 .child(div().flex().gap_1().children(notes).child(button))
                 .into_any_element(),
-        ]
+        ];
+        // Everything that's new since this version, newest first.
+        if let AppUpdate::Available(release)
+        | AppUpdate::Downloading(release, _)
+        | AppUpdate::Ready(release, _) = &update
+        {
+            rows.extend(release.notes.iter().map(|notes| {
+                let name = format!("Chessdesk {}", notes.version);
+                let entries = notes.entries.iter().cloned().map(SharedString::from);
+                ui::notes(tr_with!("whats-new-in", name = name), entries, &settings)
+                    .pb_3()
+                    .into_any_element()
+            }));
+        }
+        rows
     }
 
     /// What a page needs to know when it opens: the engines' latest releases.

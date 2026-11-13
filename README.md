@@ -28,8 +28,8 @@ account. Pick any model the agent offers and how hard it thinks, and tell it how
 words: "Open with the London System", "Go easy on me", "Play like it's 1852".
 
 **Or play an engine.** Stockfish goes from about 1320 engine Elo up to full strength.
-[Shadowchess](https://github.com/chessdesk/shadowchess) plays like Lichess players rated 500, 1000
-or 1500, with as many mistakes as they make. Maia is trained on human games too, but plays well
+[Shadowchess](https://github.com/chessdesk/shadowchess) plays like Lichess players rated 500 to
+1800, with as many mistakes as they make. Maia is trained on human games too, but plays well
 above its rating.
 
 **Learn while you play.** Turn on tutoring mode and the agent comments as you go, or Stockfish rates
